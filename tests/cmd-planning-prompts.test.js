@@ -278,6 +278,12 @@ test('known runners never interpolate goals into shell commands; custom runners 
     assert.match(runner.command, new RegExp('^' + key));
     assert.ok(!runner.args.some((x) => /evil-goal/.test(x)));
   }
+  for (const inherited of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+    const runner = resolveRunner(inherited);
+    assert.equal(runner.custom, true, inherited);
+    assert.equal(runner.shell, true, inherited);
+    assert.equal(runner.command, inherited);
+  }
   const custom = resolveRunner('node "evil-goal ; unexpected"');
   assert.equal(custom.shell, true);
   assert.equal(custom.custom, true);
