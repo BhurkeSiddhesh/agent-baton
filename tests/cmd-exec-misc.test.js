@@ -218,9 +218,27 @@ test('dispatch refuses a provider that differs from assigned author (including d
   const r = repo();
   const wrong = await cli(r.root, ['dispatch', 'WP-001', '--to', 'claude', '--dry-run']);
   assert.equal(wrong.status, 1);
-  assert.match(wrong.stderr, /assigned to codex, not claude/);
+  assert.match(wrong.stderr, /assigned to codex \(provider codex\), not claude/);
   const correct = await cli(r.root, ['dispatch', 'WP-001', '--to', 'codex', '--dry-run', '--json']);
   assert.equal(correct.status, 0, correct.stderr);
   assert.equal(json(correct).to, 'codex');
   assert.match(json(correct).body, /BATON_AGENT=codex/);
+});
+
+test('dispatch respects provider kinds when a roster id differs from its CLI adapter', async () => {
+  const plan = samplePlan();
+  plan.packets[0].agent = 'claude-a';
+  plan.packets[0].reviewer = 'gemini';
+  const cfg = sampleConfig();
+  cfg.agents.push({ id: 'claude-a', name: 'Claude A', kind: 'claude', roles: ['worker', 'reviewer'], strengths: [] });
+  const r = repo({ plan, config: cfg });
+  const response = await cli(r.root, ['dispatch', 'WP-001', '--to', 'claude', '--dry-run', '--json']);
+  assert.equal(response.status, 0, response.stderr);
+  const brief = json(response).body;
+  assert.match(brief, /^@claude please take/);
+  assert.match(brief, /BATON_AGENT=claude-a/);
+  assert.match(brief, /begin WP-001 --agent claude-a/);
+  const wrong = await cli(r.root, ['dispatch', 'WP-001', '--to', 'codex', '--dry-run']);
+  assert.equal(wrong.status, 1);
+  assert.match(wrong.stderr, /provider claude/);
 });
