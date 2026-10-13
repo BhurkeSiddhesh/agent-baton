@@ -1,0 +1,43 @@
+name: platform-compat
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  windows-shells:
+    name: windows shell smoke (${{ matrix.shell }}, node 20)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [pwsh, cmd, bash]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Verify Windows shell can launch Baton in a Unicode/space path
+        shell: ${{ matrix.shell }}
+        run: node .github/scripts/platform-smoke.mjs
+
+  posix-smoke:
+    name: unicode and CRLF smoke (${{ matrix.os }}, node 20)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Verify fixture repository and paths
+        run: node .github/scripts/platform-smoke.mjs
