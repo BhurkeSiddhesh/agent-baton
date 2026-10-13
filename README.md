@@ -95,12 +95,140 @@ Details, detection rules and exact paths: [docs/AGENTS.md](docs/AGENTS.md).
 Plan, assign, begin, build, verify, submit, review, accept or reject, then merge. Every arrow is a ledger event.
 [docs/WORKFLOW.md](docs/WORKFLOW.md) has the full lifecycle, review rules, audit mode, escalation and handoff.
 
+## From a feature request to merged code: who orchestrates, and how do agents pick up work?
+
+**Example request:** "Work on adding a CSV export feature, with validation and tests."
+
+Agent Baton is a **coordination protocol and CLI**, not a background agent supervisor. The *orchestrator* is a role
+(normally Claude, or a human) that plans and assigns work. The *workers* are coding agents you start locally or
+dispatch through supported GitHub workflows. All actors read the **same plan** (`.baton/plan.json`) and share events
+through the **ledger** (`.baton/ledger/` and the local store).
+
+| Step | Who acts | What happens | Command / output |
+|---|---|---|---|
+| 1. Request | Human | States the feature goal | Natural-language goal to `baton split` |
+| 2. Plan | Orchestrator (optionally AI-assisted) | Proposes tracks, small packets, file ownership, dependencies and done checks | `baton split "..." --run claude` → proposal file |
+| 3. Approve | Human / orchestrator | Reviews, imports, assigns and commits the plan | `plan import`, `assign`, `check` |
+| 4. Find work | Each agent **when started** | Reads the same ledger-backed queue; reviews and rework come before new build work | `baton next --agent codex` |
+| 5. Claim | Worker | Creates or checks out its task branch, starts its packet, receives a lease and an ownership scope | `baton begin WP-001 --agent codex` |
+| 6. Build | Worker | Edits *only* owned paths, commits the implementation and runs the verify gate | `baton verify WP-001`, `baton submit WP-001` |
+| 7. Review | Different assigned reviewer | Inspects the exact commit, checks tests and evidence, records findings or verdict | `baton review WP-001`, then `accept` / `fix` / `reject` |
+| 8. Integrate | Orchestrator / human | Merges the accepted commit if Git can fast-forward; otherwise sync, reverify and re-review | `baton merge WP-001`, or `baton sync` |
+| 9. Repeat | Agents / orchestrator | Pick the next review or packet until nothing is ready | `baton next`, `baton status`, `baton digest` |
+
+### A concrete walkthrough (manual / local agents, supported today)
+
+Install in **your application's repository**. Choose installed agent adapters and an actual project test command
+(`npm test` below is an example for a Node.js project):
+
+```bash
+cd your-app
+npx github:BhurkeSiddhesh/agent-baton init --agents claude,codex --test-cmd "npm test" --yes
+git add -A && git commit -m "Initialize Agent Baton"
+```
+
+**1. Turn the user's sentence into a reviewed plan.** The orchestrator can create a plan by hand or ask an installed
+agent CLI to produce a *proposal*. The AI-assisted command **only generates the proposal**; it does not import it or
+start workers.
+
+```bash
+node .baton/runtime/bin/baton.js split \
+  "Add a CSV export feature with input validation and automated tests" --run claude
+# Prints a path such as .baton/proposals/<timestamp>.json; use that actual path below.
+node .baton/runtime/bin/baton.js plan import .baton/proposals/<timestamp>.json --dry-run
+# Inspect/edit the proposal, then apply it explicitly:
+node .baton/runtime/bin/baton.js plan import .baton/proposals/<timestamp>.json
+node .baton/runtime/bin/baton.js assign --by human
+node .baton/runtime/bin/baton.js check
+git add .baton/ && git commit -m "Plan CSV export feature"
+```
+
+The plan records packet IDs such as `WP-001`, its `owns` paths, dependencies, completion checks, author and reviewer.
+If you do **not** have an AI CLI, run `split "goal" --out .baton/prompt.md` to generate a planning prompt, or create
+a track and packets manually with `plan track add` and `plan add`. A new project has **no tracks** until you create
+or import them. See [Quickstart](docs/QUICKSTART.md).
+
+**2. Start a coding-agent session and ask it to follow `AGENTS.md`.** Installation writes instruction/adaptor files
+for the selected tools. The adapter explains the Baton protocol to that tool; **it does not itself spawn the tool**.
+A running Codex session can execute:
+
+```bash
+node .baton/runtime/bin/baton.js check
+node .baton/runtime/bin/baton.js next --agent codex
+# Choose a READY packet actually assigned to codex (e.g. WP-001).
+git switch -c baton/WP-001-csv-export
+node .baton/runtime/bin/baton.js begin WP-001 --agent codex
+# Codex now implements the feature within WP-001's owns paths.
+git add -A && git commit -m "Implement CSV export packet WP-001"
+node .baton/runtime/bin/baton.js verify WP-001
+node .baton/runtime/bin/baton.js submit WP-001 --agent codex
+```
+
+Do not reuse the same working tree for concurrent agents: use separate packet branches/worktrees. The owner and packet
+number above are examples, **not** guaranteed output from `assign`. Actual agents must use their assignment from
+`next`. For long-running work, run `baton heartbeat WP-001 --agent codex` to renew the lease.
+
+**3. Start the assigned reviewer.** If the plan assigns Claude to review `WP-001`, Claude's session runs:
+
+```bash
+node .baton/runtime/bin/baton.js next --agent claude
+node .baton/runtime/bin/baton.js review WP-001
+# Check the exact commit, diff, tests and done checks; do not just trust the sign-off.
+node .baton/runtime/bin/baton.js accept WP-001 --by claude --note "Reviewed commit and tests"
+# Alternatively: baton fix WP-001 --by claude --note "..."
+# Or:          baton reject WP-001 --by claude --note "..."
+```
+
+The orchestrator/human then integrates accepted work:
+
+```bash
+node .baton/runtime/bin/baton.js merge WP-001 --by human
+node .baton/runtime/bin/baton.js status
+node .baton/runtime/bin/baton.js next --agent codex
+```
+
+`merge` is **fast-forward only**. If `main` has moved, use `baton sync` on the packet branch, then re-run verification
+and review before merging. `submit` and a Baton verdict are **not a substitute** for required GitHub branch protection
+or pull-request approval in a hosted repository.
+
+### How do other agents find and pick up tasks?
+
+- **Local (Claude Code, Codex CLI, Gemini CLI, Antigravity, etc.):** launch the coding tool in the project, have it
+  follow its generated instruction adapter and `AGENTS.md`, run `baton next --agent <id>`, and then `begin` its
+  assigned packet. `next` presents reviews, rework, assigned ready packets, stretch work and audits. The instructions
+  tell the agent how to behave; a separate agent session must exist.
+- **GitHub / cloud:** initialize with `--cloud`, configure the provider's own GitHub app, permissions and
+  credentials, then run `baton dispatch WP-001 --to claude` (or `copilot`, `codex`, `any`). `dispatch` creates a
+  GitHub **issue containing the packet brief**; it does not universally launch a remote worker. The generated
+  `@claude` workflow can be triggered when correctly configured; Copilot/Codex handoff depends on their respective
+  integrations. See [Cloud agents](docs/CLOUD.md).
+- **One orchestrator, many workers:** the orchestrator can plan and assign repeatedly, but does **not** automatically
+  schedule continuously running agents. A human or external controller must start/poll their sessions and ensure they
+  keep calling `next`; leases and Git branches protect against ordinary coordination mistakes, not malicious code.
+
+### What is automatic *today*, and what still needs a runner?
+
+| Exists in the core CLI today | Requires a human, existing agent integration, or future execution controller |
+|---|---|
+| Planning prompt and optional AI-generated **proposal** | Turning an arbitrary chat/GitHub issue into an approved plan without invoking `split` |
+| Packet assignment, dependency checks and `next` queue | Starting every assigned coding-agent CLI automatically |
+| Packet leases, file-scope checks, secret scan, tests, review state and ledger | Continuously polling, heartbeating and supervising multiple live agent processes |
+| GitHub issue dispatch and optional cloud workflows | Guaranteeing execution across arbitrary agent providers and accounts |
+| Git worktree helpers, rebase and fast-forward integration | Conflict-free global claims across disconnected cloud clones; authoritative cross-clone coordination |
+
+**End-to-end mental model:** You request a feature → Baton helps produce a plan → a human accepts it → agents **you
+start or explicitly dispatch** read `next`, claim scoped packets, code and verify → another agent reviews → the
+orchestrator merges accepted work. A fully autonomous "submit one sentence and watch an agent office work" controller
+is a [future roadmap](https://github.com/BhurkeSiddhesh/agent-baton/issues), not a current built-in feature.
+
 ## Example session
 
 Two agents (`claude` orchestrates, `codex` reviews). Output is trimmed.
 
 ```console
-$ baton plan add --title "Docs" --owns docs/ --by human
+$ baton plan track add --id docs --owner claude --owns docs/ --by human
+added track docs
+$ baton plan add --title "Docs" --track docs --owns docs/ --by human
 added WP-001  Docs
 $ baton assign --by human
 WP-001   agent - -> claude              reviewer - -> codex               (lowest load; review load 0)
