@@ -20,10 +20,14 @@ export function validatePackage(entry, pkg) {
   for (const required of REQUIRED) if (!paths.has(required)) problems.push('missing ' + required);
   const forbidden = [...paths].filter((p) =>
     /(^|\/)(?:\.env(?:\..*)?|\.git|node_modules|\.baton|\.github)(?:\/|$)/i.test(p) ||
-    /(?:^|\/)(?:id_rsa|id_ed25519|\.npmrc|\.pypirc|[^/]+\.pem|[^/]+\.key)$/i.test(p));
+    /(?:^|\/)(?:\.envrc|id_rsa|id_ed25519|\.npmrc|\.pypirc|[^/]+\.pem|[^/]+\.key)$/i.test(p));
   for (const item of forbidden) problems.push('unexpected sensitive or development-only file ' + item);
-  if (Object.keys(pkg.dependencies || {}).length) problems.push('runtime dependencies must remain empty');
-  if (pkg.bin?.baton !== 'bin/baton.js') problems.push('published baton bin entrypoint changed');
+  for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
+    if (Object.keys(pkg[field] || {}).length) problems.push(`runtime dependencies must remain empty (${field})`);
+  }
+  for (const binary of ['baton', 'agent-baton']) {
+    if (pkg.bin?.[binary] !== 'bin/baton.js') problems.push(`published ${binary} bin entrypoint changed`);
+  }
   if (pkg.license !== 'MIT') problems.push('MIT license metadata missing');
   return problems;
 }
