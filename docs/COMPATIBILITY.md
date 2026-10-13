@@ -10,7 +10,7 @@ Baton requires Node 18 or newer, but the actual automated compatibility claim is
 | Windows (latest GitHub runner) | Full tests | Full tests, smoke | Full tests | PowerShell, cmd.exe and Git Bash |
 | macOS (latest GitHub runner) | Full tests | Full tests, smoke | Full tests | Default shell, spaces, Unicode, CRLF |
 
-The [main CI](../.github/workflows/ci.yml) supplies the nine OS/Node combinations. The [shell-compatibility workflow](../.github/workflows/platform-compat.yml) runs the same independent fixture under three Windows shells. It uses a Unicode/space-containing temporary directory, CRLF source content, idempotent initialization, `doctor`, `check` and machine-readable `status` output.
+The [CI workflow](../.github/workflows/ci.yml) supplies the nine OS/Node combinations and runs the independent compatibility fixture in the smoke job under PowerShell, cmd.exe and Git Bash on Windows. It uses a Unicode/space-containing temporary directory, CRLF source content, idempotent initialization, `doctor`, `check` and machine-readable `status` output.
 
 **Git baseline:** Git 2.30 or newer is the declared compatibility target for branch/worktree and history operations (the core snapshot mode runs without Git). Hosted runners use their supplied installed Git; this workflow prints the actual `git --version` for each job. **Git 2.30 is not yet pinned and tested separately**; do not claim that specific minimum version has been certified until a pinned older-Git lane is implemented.
 
