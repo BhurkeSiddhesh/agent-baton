@@ -208,7 +208,7 @@ test('merge refuses when main moved on (not a fast-forward) and leaves main alon
   const m = await cli(r.root, ['merge', 'WP-001', '--by', 'claude']);
   assert.equal(m.status, 1);
   assert.match(m.stderr, /not a fast-forward/);
-  assert.match(m.stderr, /baton sync/);
+  assert.match(m.stderr, /replacement packet/);
   assert.equal(r.git('rev-parse', 'main'), mainTip);
   assert.notEqual(mainTip, commit);
 });
@@ -224,4 +224,98 @@ test('merge of shared-tree work is already contained in main and only records th
   // The shared tree is on main, so the verified HEAD is main's own tip: already contained, nothing to move.
   assert.equal(m.status, 0, m.stderr);
   assert.match(m.stdout, /already contained/);
+});
+
+test('merge refuses unreviewed ancestors when begin starts on a pre-existing feature branch', async () => {
+  const r = repo();
+  r.git('checkout', '-q', '-b', 'feature/unrelated');
+  r.write('docs/unrelated.md', 'unreviewed ancestor\n');
+  r.commitAll('unrelated work');
+  r.git('checkout', '-q', '-b', 'baton/WP-001');
+  assert.equal((await cli(r.root, ['begin', 'WP-001', '--agent', 'codex'])).status, 0);
+  r.write('src/api/export.js', 'export const x = 1;\n');
+  r.commitAll('packet implementation');
+  assert.equal((await cli(r.root, ['verify', 'WP-001'])).status, 0);
+  assert.equal((await cli(r.root, ['submit', 'WP-001', '--agent', 'codex'])).status, 0);
+  assert.equal((await cli(r.root, ['accept', 'WP-001', '--by', 'claude'])).status, 0);
+  const mainBefore = r.git('rev-parse', 'main');
+  const m = await cli(r.root, ['merge', 'WP-001', '--by', 'claude']);
+  assert.equal(m.status, 1, m.stderr);
+  assert.match(m.stderr, /unverified ancestor commits/);
+  assert.equal(r.git('rev-parse', 'main'), mainBefore);
+});
+
+test('sync refuses rebasing an accepted packet and does not rewrite its commit', async () => {
+  const r = repo();
+  const commit = await submitOnBranch(r);
+  assert.equal((await cli(r.root, ['accept', 'WP-001', '--by', 'claude'])).status, 0);
+  r.git('checkout', '-q', 'main');
+  r.write('docs/main-update.md', 'main moves\n');
+  r.commitAll('move main');
+  r.git('checkout', '-q', 'track/api');
+  const before = r.git('rev-parse', 'HEAD');
+  const reply = await cli(r.root, ['sync']);
+  assert.equal(reply.status, 1, reply.stderr);
+  assert.match(reply.stderr, /accepted packet/);
+  assert.equal(r.git('rev-parse', 'HEAD'), before);
+  assert.equal(before, commit);
+});
+
+test('publishing ledger to main persists reviewed and merged packet state in a fresh clone', async () => {
+  const r = repo();
+  await submitOnBranch(r);
+  assert.equal((await cli(r.root, ['accept', 'WP-001', '--by', 'claude'])).status, 0);
+  assert.equal((await cli(r.root, ['merge', 'WP-001', '--by', 'claude'])).status, 0);
+  r.git('checkout', '-q', 'main');
+  const exported = await cli(r.root, ['ledger', 'export']);
+  assert.equal(exported.status, 0, exported.stderr);
+  r.git('add', '.baton/ledger');
+  r.git('commit', '-q', '-m', 'baton: publish reviewed lifecycle events');
+  const fresh = path.join(tmpDir(), 'clone');
+  r.git('clone', '-q', r.root, fresh);
+  const review = await cli(fresh, ['review', 'WP-001', '--json']);
+  assert.equal(review.status, 0, review.stderr);
+  const s = json(review);
+  assert.equal(s.status, 'ACCEPTED');
+  assert.ok(readEvents(fresh).some((e) => e.kind === 'merged' && e.packet === 'WP-001'));
+  assert.equal((await cli(fresh, ['ledger', 'verify'])).status, 0);
+});
+
+test('sync allows branch rebases when accepted ancestor has already been merged into main', async () => {
+  const r = repo();
+  await submitOnBranch(r);
+  assert.equal((await cli(r.root, ['accept', 'WP-001', '--by', 'claude'])).status, 0);
+  assert.equal((await cli(r.root, ['merge', 'WP-001', '--by', 'claude'])).status, 0);
+  r.git('checkout', '-q', 'main');
+  r.git('checkout', '-q', '-b', 'track/follow-up');
+  r.write('docs/follow-up.md', 'branch work\n');
+  r.commitAll('follow-up on integrated feature');
+  r.git('checkout', '-q', 'main');
+  r.write('docs/new-main.md', 'upstream work\n');
+  const mainHead = r.commitAll('new upstream commit');
+  r.git('checkout', '-q', 'track/follow-up');
+  const result = await cli(r.root, ['sync']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(r.git('merge-base', '--is-ancestor', mainHead, 'HEAD') ?? '', '');
+});
+
+test('merge accepts a freshly reverified unfinished packet rebased onto newer integration history', async () => {
+  const r = repo();
+  r.git('checkout', '-q', '-b', 'track/api');
+  assert.equal((await cli(r.root, ['begin', 'WP-001', '--agent', 'codex'])).status, 0);
+  r.write('src/api/export.js', 'export const x = 1;\n');
+  r.commitAll('implement WP-001');
+  r.git('checkout', '-q', 'main');
+  r.write('.baton/state/coordination-note.txt', 'main advanced\n');
+  r.commitAll('integration coordination update');
+  r.git('checkout', '-q', 'track/api');
+  assert.equal((await cli(r.root, ['sync'])).status, 0);
+  const verification = await cli(r.root, ['verify', 'WP-001']);
+  assert.equal(verification.status, 0, verification.stdout + verification.stderr);
+  assert.equal((await cli(r.root, ['submit', 'WP-001', '--agent', 'codex'])).status, 0);
+  assert.equal((await cli(r.root, ['accept', 'WP-001', '--by', 'claude'])).status, 0);
+  const commit = r.git('rev-parse', 'HEAD');
+  const m = await cli(r.root, ['merge', 'WP-001', '--by', 'claude']);
+  assert.equal(m.status, 0, m.stderr);
+  assert.equal(r.git('rev-parse', 'main'), commit);
 });

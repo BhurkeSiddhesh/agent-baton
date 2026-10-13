@@ -2,7 +2,7 @@ import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { makeTempRepo, samplePlan } from './helpers.js';
+import { makeTempRepo, samplePlan, sampleConfig } from './helpers.js';
 import { main } from '../src/cli.js';
 import { memoryStream } from '../src/lib/context.js';
 import { stateDir } from '../src/lib/store.js';
@@ -170,7 +170,13 @@ test('dispatch --dry-run prints the gh command and a complete brief, and changes
 });
 
 test('dispatch targets: mentions, assignee, repo flag, JSON', async () => {
-  const r = repo();
+  const plan = samplePlan();
+  plan.packets[2].agent = 'copilot';
+  const config = sampleConfig();
+  config.agents.push({ id: 'copilot', name: 'Copilot', kind: 'copilot', roles: ['worker', 'reviewer'], strengths: [] });
+  const r = repo({ plan, config });
+  assert.equal((await cli(r.root, ['reassign', 'WP-001', '--reviewer', 'gemini', '--by', 'claude'])).status, 0);
+  assert.equal((await cli(r.root, ['handoff', 'WP-001', '--to', 'claude', '--by', 'claude'])).status, 0);
   const claude = json(await cli(r.root, ['dispatch', 'WP-001', '--to', 'claude', '--repo', 'me/proj', '--dry-run', '--json']));
   assert.equal(claude.dryRun, true);
   assert.deepEqual(claude.command.slice(0, 3), ['gh', 'issue', 'create']);
@@ -179,8 +185,8 @@ test('dispatch targets: mentions, assignee, repo flag, JSON', async () => {
   assert.ok(!claude.command.includes('--assignee'));
   const copilot = json(await cli(r.root, ['dispatch', 'WP-003', '--to', 'copilot', '--dry-run', '--json']));
   assert.ok(copilot.command.join(' ').includes('--assignee @copilot'));
-  assert.ok(copilot.body.includes('BATON_AGENT=gemini'));
-  const codex = json(await cli(r.root, ['dispatch', 'WP-001', '--to', 'codex', '--dry-run', '--json']));
+  assert.ok(copilot.body.includes('BATON_AGENT=copilot'));
+  const codex = json(await cli(r.root, ['dispatch', 'WP-002', '--to', 'codex', '--dry-run', '--json']));
   assert.ok(codex.body.startsWith('@codex'));
   const any = json(await cli(r.root, ['dispatch', 'WP-001', '--dry-run', '--json']));
   assert.ok(any.body.startsWith('# WP-001'));
@@ -206,4 +212,33 @@ test('buildBrief falls back sensibly for unassigned packets', () => {
   assert.ok(brief.includes('BATON_AGENT=<your-agent-id>'));
   assert.ok(brief.includes('The change is complete and the tests pass'));
   assert.ok(brief.includes('baton/WP-9'));
+});
+
+test('dispatch refuses a provider that differs from assigned author (including dry-run)', async () => {
+  const r = repo();
+  const wrong = await cli(r.root, ['dispatch', 'WP-001', '--to', 'claude', '--dry-run']);
+  assert.equal(wrong.status, 1);
+  assert.match(wrong.stderr, /assigned to codex \(provider codex\), not claude/);
+  const correct = await cli(r.root, ['dispatch', 'WP-001', '--to', 'codex', '--dry-run', '--json']);
+  assert.equal(correct.status, 0, correct.stderr);
+  assert.equal(json(correct).to, 'codex');
+  assert.match(json(correct).body, /BATON_AGENT=codex/);
+});
+
+test('dispatch respects provider kinds when a roster id differs from its CLI adapter', async () => {
+  const plan = samplePlan();
+  plan.packets[0].agent = 'claude-a';
+  plan.packets[0].reviewer = 'gemini';
+  const cfg = sampleConfig();
+  cfg.agents.push({ id: 'claude-a', name: 'Claude A', kind: 'claude', roles: ['worker', 'reviewer'], strengths: [] });
+  const r = repo({ plan, config: cfg });
+  const response = await cli(r.root, ['dispatch', 'WP-001', '--to', 'claude', '--dry-run', '--json']);
+  assert.equal(response.status, 0, response.stderr);
+  const brief = json(response).body;
+  assert.match(brief, /^@claude please take/);
+  assert.match(brief, /BATON_AGENT=claude-a/);
+  assert.match(brief, /begin WP-001 --agent claude-a/);
+  const wrong = await cli(r.root, ['dispatch', 'WP-001', '--to', 'codex', '--dry-run']);
+  assert.equal(wrong.status, 1);
+  assert.match(wrong.stderr, /provider claude/);
 });

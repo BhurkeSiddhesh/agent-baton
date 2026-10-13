@@ -113,8 +113,9 @@ through the **ledger** (`.baton/ledger/` and the local store).
 | 5. Claim | Worker | Creates or checks out its task branch, starts its packet, receives a lease and an ownership scope | `baton begin WP-001 --agent codex` |
 | 6. Build | Worker | Edits *only* owned paths, commits the implementation and runs the verify gate | `baton verify WP-001`, `baton submit WP-001` |
 | 7. Review | Different assigned reviewer | Inspects the exact commit, checks tests and evidence, records findings or verdict | `baton review WP-001`, then `accept` / `fix` / `reject` |
-| 8. Integrate | Orchestrator / human | Merges the accepted commit if Git can fast-forward; otherwise sync, reverify and re-review | `baton merge WP-001`, or `baton sync` |
-| 9. Repeat | Agents / orchestrator | Pick the next review or packet until nothing is ready | `baton next`, `baton status`, `baton digest` |
+| 8. Integrate | Orchestrator / human | Fast-forwards the exact reviewed commit if it started at the integration tip; otherwise create a replacement packet | `baton merge WP-001` |
+| 9. Publish ledger | Orchestrator / human | Exports and commits all lifecycle events on the integration branch so fresh clones replay the verdict | `baton ledger export`, `git add .baton/ledger`, `git commit` |
+| 10. Repeat | Agents / orchestrator | Sync each worktree's plan with the integration branch, then read the queue again | `git merge --ff-only main`, `baton next` |
 
 ### A concrete walkthrough (manual / local agents, supported today)
 
@@ -156,6 +157,9 @@ A running Codex session can execute:
 node .baton/runtime/bin/baton.js check
 node .baton/runtime/bin/baton.js next --agent codex
 # Choose a READY packet actually assigned to codex (e.g. WP-001).
+# IMPORTANT: start from the integration tip, not another feature or stale track branch.
+git switch main
+git pull --ff-only                    # when main tracks an accessible remote
 git switch -c baton/WP-001-csv-export
 node .baton/runtime/bin/baton.js begin WP-001 --agent codex
 # Codex now implements the feature within WP-001's owns paths.
@@ -179,17 +183,39 @@ node .baton/runtime/bin/baton.js accept WP-001 --by claude --note "Reviewed comm
 # Or:          baton reject WP-001 --by claude --note "..."
 ```
 
-The orchestrator/human then integrates accepted work:
+The orchestrator/human integrates accepted work, then **publishes the complete ledger**:
 
 ```bash
+# First run on the packet's branch/worktree, once the separate reviewer accepted it:
 node .baton/runtime/bin/baton.js merge WP-001 --by human
+
+# Then in the MAIN worktree (not in the packet worktree):
+git switch main                        # only if main is not checked out in another worktree
+node .baton/runtime/bin/baton.js ledger export
+node .baton/runtime/bin/baton.js ledger verify
+git add .baton/ledger/
+git diff --cached -- .baton/ledger/     # review exactly which events are being published
+git commit -m "baton: publish WP-001 lifecycle events"
+git push                                # if the integration branch has a remote
 node .baton/runtime/bin/baton.js status
-node .baton/runtime/bin/baton.js next --agent codex
 ```
 
-`merge` is **fast-forward only**. If `main` has moved, use `baton sync` on the packet branch, then re-run verification
-and review before merging. `submit` and a Baton verdict are **not a substitute** for required GitHub branch protection
-or pull-request approval in a hosted repository.
+**Why the extra commit?** `verify`, `submit`, `accept` and `merge` append events **after** the worker's
+implementation commit. Baton's `merge` fast-forwards `main` to that implementation commit, but **does not**
+automatically commit these later `.baton/ledger/*.json` events. The commands above explicitly export the shared
+local Git-common-directory event store into the tracked mirror, commit it on `main`, and push it. A fresh clone
+then replays the accepted and merged state. This is **required for durable cross-clone handoff**; a green local status
+without publishing the ledger is not enough. When working across separate clones, first reconcile/import the
+remote event mirror and verify it—one clone's local events are not automatically visible in another clone.
+
+**If `main` moved after acceptance:** do **not** follow the old `sync → verify → submit` advice. An `ACCEPTED`
+packet cannot be begun, verified or resubmitted under the current state machine, and `sync` now rejects rewriting
+its accepted commit. **Unfinished `IN_PROGRESS` packets are different:** they may rebase onto a newer `main`,
+then freshly `verify` and `submit` for independent review; the original begin base must be in the integration
+history, not on an unrelated feature branch. The supported recovery is to create a **new replacement packet** from updated `main` with
+explicit ownership and a fresh `begin → verify → submit → independent accept → merge` cycle. Leave the old accepted
+packet as unmerged history; do not present it as integrated. `baton sync` is for unfinished branches, not accepted
+work. `submit` and a Baton verdict are **not a substitute** for GitHub branch protection or required PR approvals.
 
 ### How do other agents find and pick up tasks?
 
@@ -197,14 +223,26 @@ or pull-request approval in a hosted repository.
   follow its generated instruction adapter and `AGENTS.md`, run `baton next --agent <id>`, and then `begin` its
   assigned packet. `next` presents reviews, rework, assigned ready packets, stretch work and audits. The instructions
   tell the agent how to behave; a separate agent session must exist.
-- **GitHub / cloud:** initialize with `--cloud`, configure the provider's own GitHub app, permissions and
-  credentials, then run `baton dispatch WP-001 --to claude` (or `copilot`, `codex`, `any`). `dispatch` creates a
-  GitHub **issue containing the packet brief**; it does not universally launch a remote worker. The generated
+- **GitHub / cloud:** initialize with `--cloud`, configure the provider's GitHub app, permissions and credentials;
+  create the required label in the **dispatch destination repository** with
+  `gh label create baton --repo owner/name --color 0969da` (use the destination's actual owner/name; skip if it
+  already exists). **Check the packet's assigned author** with `baton review WP-001` before dispatching. If it is assigned
+  to `codex`, use `baton dispatch WP-001 --to codex`, not `--to claude`: the target must match the assigned
+  author's **provider kind**, while the issue preserves the exact author ID. For custom IDs (e.g. `claude-a` of kind
+  `claude`), configure the receiving worker to use the matching `BATON_AGENT`; the generated `@claude` GitHub
+  workflow sets `BATON_AGENT=claude` by default and needs customization before it can run as `claude-a`.
+  To use a different provider, arrange an authorized `baton handoff WP-001 --to claude --by human` first and make
+  sure the reviewer is **not** Claude (use `baton reassign` if needed). `dispatch` creates a GitHub **issue**;
+  it does not universally launch a remote worker. The generated
   `@claude` workflow can be triggered when correctly configured; Copilot/Codex handoff depends on their respective
   integrations. See [Cloud agents](docs/CLOUD.md).
 - **One orchestrator, many workers:** the orchestrator can plan and assign repeatedly, but does **not** automatically
   schedule continuously running agents. A human or external controller must start/poll their sessions and ensure they
-  keep calling `next`; leases and Git branches protect against ordinary coordination mistakes, not malicious code.
+  keep calling `next`. **Worktree plans are not shared automatically:** `.baton/plan.json` belongs to the checked-out
+  branch, even when worktrees share the Git-common-directory ledger. After publishing new packets on `main`, start
+  new packet worktrees from updated `main`, or explicitly synchronize each idle, clean worker branch using
+  `git merge --ff-only main` before `baton next`; do not sync accepted or actively edited branches blindly.
+  Leases and Git branches protect against ordinary coordination mistakes, not malicious code.
 
 ### What is automatic *today*, and what still needs a runner?
 
@@ -214,7 +252,7 @@ or pull-request approval in a hosted repository.
 | Packet assignment, dependency checks and `next` queue | Starting every assigned coding-agent CLI automatically |
 | Packet leases, file-scope checks, secret scan, tests, review state and ledger | Continuously polling, heartbeating and supervising multiple live agent processes |
 | GitHub issue dispatch and optional cloud workflows | Guaranteeing execution across arbitrary agent providers and accounts |
-| Git worktree helpers, rebase and fast-forward integration | Conflict-free global claims across disconnected cloud clones; authoritative cross-clone coordination |
+| Git worktree helpers, rebase and fast-forward integration | Automatic safe publication of late ledger events, and conflict-free global claims across disconnected cloud clones |
 
 **End-to-end mental model:** You request a feature → Baton helps produce a plan → a human accepts it → agents **you
 start or explicitly dispatch** read `next`, claim scoped packets, code and verify → another agent reviews → the

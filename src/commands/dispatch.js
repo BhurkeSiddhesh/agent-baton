@@ -52,6 +52,13 @@ export async function run(ctx, args) {
   const packet = plan.packets.find((p) => p.id === pid);
   if (!packet) throw new BatonError(`unknown packet ${pid}`, { code: 'UNKNOWN_PACKET' });
   const s = state.packets[pid];
+  // --to selects a provider, not a roster identity: e.g. claude-a may have kind=claude.
+  // The brief must retain that exact roster identity for begin/submit attribution.
+  const assigned = config.agents.find((a) => a.id === s.agent);
+  const provider = assigned?.kind || s.agent;
+  if (to !== 'any' && provider !== to) {
+    throw new BatonError(`${pid} is assigned to ${s.agent || 'no agent'} (provider ${provider || 'unknown'}), not ${to}; hand off to a compatible author and keep its reviewer independent`, { code: 'DISPATCH_AGENT_MISMATCH' });
+  }
   if (['ACCEPTED', 'ACCEPTED_WITH_FIXES', 'READY_FOR_REVIEW'].includes(s.status)) {
     throw new BatonError(`${pid} is ${s.status}; there is nothing left to dispatch`, { code: 'BAD_TRANSITION' });
   }

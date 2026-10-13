@@ -2,7 +2,7 @@
 
 This index links the **88 individually tracked engineering issues** created from the October 13, 2026 architecture review. Each issue includes implementation checklists, acceptance criteria, likely code areas and prerequisite task IDs.
 
-**Status:** Proposed backlog, not implemented work. **Prioritization:** P0 = correctness/release blocker; P1 = core capability; P2 = usability/scale; P3 = optional provider expansion. M1–M5 milestones in issue bodies are *planning phases*, not configured GitHub Milestone objects.
+**Status:** 88 tracked issues; **BAT-001, BAT-002 and BAT-003 completed** in [CI stabilization PR #90](https://github.com/BhurkeSiddhesh/agent-baton/pull/90) (all 13 GitHub Actions jobs passed on `main` on October 13, 2026). Other items remain proposed unless their GitHub issue is closed. **Prioritization:** P0 = correctness/release blocker; P1 = core capability; P2 = usability/scale; P3 = optional provider expansion. M1–M5 milestones in issue bodies are *planning phases*, not configured GitHub Milestone objects.
 
 **How to execute this roadmap:** Work through release stabilization and security before enabling unattended execution. The existing CLI coordinates workers, but its adapters do not automatically start coding-agent sessions. See the [README feature walkthrough](../README.md#from-a-feature-request-to-merged-code-who-orchestrates-and-how-do-agents-pick-up-work).
 
@@ -12,9 +12,9 @@ Restore a green supported-platform CI matrix, safe installation and reproducible
 
 | Issue | Priority | Work item |
 |---|---|---|
-| [BAT-001](https://github.com/BhurkeSiddhesh/agent-baton/issues/1) | P0 | Fix Windows Git/path test failures |
-| [BAT-002](https://github.com/BhurkeSiddhesh/agent-baton/issues/2) | P0 | Repair Node 18 ESM command-discovery failures |
-| [BAT-003](https://github.com/BhurkeSiddhesh/agent-baton/issues/3) | P0 | Make generated command documentation deterministic |
+| [BAT-001](https://github.com/BhurkeSiddhesh/agent-baton/issues/1) | P0 · Done | Fix Windows Git/path test failures |
+| [BAT-002](https://github.com/BhurkeSiddhesh/agent-baton/issues/2) | P0 · Done | Repair Node 18 ESM command-discovery failures |
+| [BAT-003](https://github.com/BhurkeSiddhesh/agent-baton/issues/3) | P0 · Done | Make generated command documentation deterministic |
 | [BAT-004](https://github.com/BhurkeSiddhesh/agent-baton/issues/4) | P0 | Build release-quality CI gates |
 | [BAT-005](https://github.com/BhurkeSiddhesh/agent-baton/issues/5) | P0 | Protect main and release branches |
 | [BAT-006](https://github.com/BhurkeSiddhesh/agent-baton/issues/6) | P0 | Define supported OS, Git and Node versions |
@@ -152,7 +152,7 @@ Publish tested examples, package distribution, governance and success metrics.
 
 ## Release sequencing
 
-1. **M1 — Stable CLI:** Resolve current CI failures, secure command launch, harden install and release gating.
+1. **M1 — Stable CLI:** Initial Windows, Node 18 and generated-doc failures are resolved (BAT-001–003); continue security hardening, branch protection, installer safety and release gates.
 2. **M2 — Trust + coordination:** Establish stronger identity policies and correct distributed claims, leases and replay.
 3. **M3 — Autonomous runner:** Implement optional process supervisors, worktree isolation, concurrency and end-to-end demo.
 4. **M4 — Integrations:** Harden GitHub handoffs, PR review, merge queue and interface compatibility.
