@@ -40,6 +40,10 @@ export function collectRuntime({ srcRoot = packageRoot(), templates = path.join(
   copyTree(path.join(srcRoot, 'bin'), `${RUNTIME_DIR}/bin`, out);
   copyTree(path.join(srcRoot, 'src'), `${RUNTIME_DIR}/src`, out);
   copyTree(templates, `${RUNTIME_DIR}/templates`, out);
+  // The vendored runtime redistributes substantial MIT-licensed source code.
+  // Keep the upstream permission and warranty notice with each installed copy.
+  const license = path.join(srcRoot, 'LICENSE');
+  if (fs.existsSync(license)) out.push({ rel: `${RUNTIME_DIR}/LICENSE`, data: fs.readFileSync(license) });
   out.push({ rel: `${RUNTIME_DIR}/package.json`, data: runtimePackageJson() });
   return out.sort((a, b) => (a.rel < b.rel ? -1 : 1));
 }
