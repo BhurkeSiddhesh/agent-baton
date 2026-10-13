@@ -16,7 +16,7 @@ Closes #<!-- required: replace with the issue number when all acceptance criteri
 - **CI run:** <!-- URL; mark pending until finished -->
 - **Reproduction before / after:** <!-- for a bug; otherwise N/A -->
 
-## Compatibility and rollback
+## Compatibility and Rollback
 
 <!-- CLI/JSON schemas, config, ledger, release/install compatibility; migration needed? How to recover? -->
 
