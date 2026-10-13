@@ -6,13 +6,13 @@ export const name = 'sync';
 export const group = 'Execution';
 export const summary = 'Rebase the current track branch onto main';
 export const usage = 'baton sync [--json]';
-export const description = 'Refuses on main, with uncommitted work, or in detached HEAD. A conflicting rebase is aborted and the branch is left untouched. Verify again afterwards: the commit changed.';
+export const description = 'Refuses on main, dirty or detached branches, and branches containing accepted commits. A conflicting rebase is aborted. Active packets must begin a new verification lifecycle after rebasing; accepted packets require a new packet.';
 export const options = { json: { type: 'boolean', description: 'print a JSON document' } };
 
 export async function run(ctx, args) {
   const root = ctx.root;
   if (!isGit(root)) throw new BatonError('sync needs a git repository', { code: 'NOT_GIT' });
-  const { config } = ctx.loadState();
+  const { config, state } = ctx.loadState();
   const main = mainRef(root, config.branches?.main);
   const branch = currentBranch(root);
   if (!main) throw new BatonError('no main branch found', { code: 'NO_MAIN' });
@@ -20,6 +20,11 @@ export async function run(ctx, args) {
   if (branch === main) throw new BatonError(`you are on ${main}; sync is for track branches`, { code: 'ON_MAIN' });
   if (isDirty(root, { exclude: BUILTIN_COORDINATION })) throw new BatonError('commit or stash your changes before syncing', { code: 'DIRTY_TREE' });
   const before = headCommit(root);
+  // Rebase would rewrite a reviewed commit while leaving its event state ACCEPTED.
+  // No legal verify/submit transition exists after ACCEPTED; block this misleading path.
+  const accepted = Object.values(state.packets).filter((s) => s.status === 'ACCEPTED' && s.commit &&
+    git(root, ['merge-base', '--is-ancestor', s.commit, before])?.status === 0);
+  if (accepted.length) throw new BatonError(`cannot rebase ${branch}: contains accepted packet(s) ${accepted.map((s) => s.id).join(', ')}; create and review a replacement packet from updated ${main}`, { code: 'ACCEPTED_REBASE' });
   const r = git(root, ['rebase', main]);
   if (!r || r.status !== 0) {
     git(root, ['rebase', '--abort']);
