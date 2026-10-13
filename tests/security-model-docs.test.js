@@ -35,7 +35,7 @@ test('security model retains explicit enforcement and residual-risk disclosures'
     /not a sandbox/i,
     /caller assertions/i,
     /shell: true/i,
-    /fail/i,
+    /unparseable JSON|invalid JSON/i,
     /SHA-256/i,
     /GitHub branch/i,
     /prompt injection/i,
