@@ -14,6 +14,10 @@ GitHub; `npx agent-baton init` will work once the package is on npm. `init` vend
 `.baton/runtime/`, so after that every agent and CI job runs `node .baton/runtime/bin/baton.js ...` with no install and
 no network.
 
+## If I create a GitHub issue or type a feature request, will agents automatically start and open a PR?
+
+**No, not in the current CLI.** A goal can become a planning prompt or an agent-produced proposal, which still needs explicit import and assignment. A worker session must be started by you or by an independently configured provider integration. `baton next` tells that running agent which packet is available; `dispatch` creates an issue and does not guarantee a remote executor runs. A separate review and verified GitHub integration are needed for a PR to be ready. See the [end-to-end walkthrough](../README.md#from-a-feature-request-to-merged-code-who-orchestrates-and-how-do-agents-pick-up-work) and [roadmap](ROADMAP.md).
+
 ## Does it call any AI or network service?
 
 No. Baton makes no network calls and holds no credentials. `baton dispatch` runs your own `gh`, and
