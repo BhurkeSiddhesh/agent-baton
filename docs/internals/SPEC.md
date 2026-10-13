@@ -7,8 +7,8 @@ agent (Claude Code, Codex, Gemini CLI, Antigravity, Cursor, Copilot, Windsurf, C
 the same protocol. Local and cloud agents share state through a conflict-free, git-mergeable ledger.
 
 It generalises a working in-house harness. **Reference implementation to port semantics from (read it):**
-`C:\Users\siddh\Desktop\Projects\creator-analytics-hub\tools\harness.py` (1343 lines) and
-`C:\Users\siddh\Desktop\Projects\creator-analytics-hub\docs\ORCHESTRATION.md`, `AGENTS.md`, `docs\AGENT_BUS.md`.
+the original in-house `tools/harness.py` and
+`docs/ORCHESTRATION.md`, `AGENTS.md`, `docs/AGENT_BUS.md`.
 Do NOT copy project-specific content (creator analytics, YouTube, Python). Keep the *mechanics*.
 
 ## 0. Hard constraints
