@@ -80,7 +80,7 @@ jobs:
           git config --global user.name "ci"
           git config --global init.defaultBranch main
       - name: CLI and integration tests
-        run: node --test tests/cmd-*.test.js tests/e2e.test.js
+        run: node --test tests/cmd-*.test.js tests/e2e.test.js tests/integration-*.test.js tests/install-*.test.js
 
   security:
     name: security regressions (${{ matrix.os }})
@@ -136,7 +136,15 @@ jobs:
           TMP="$(mktemp -d)"
           cd "$TMP"
           npm install --offline --ignore-scripts --no-audit --no-fund "$GITHUB_WORKSPACE/$TARBALL"
-          node node_modules/agent-baton/bin/baton.js version
+          "$TMP/node_modules/.bin/agent-baton" version
+          "$TMP/node_modules/.bin/baton" version
+          PROJECT="$(mktemp -d)"
+          cd "$PROJECT"
+          git init -q
+          printf '{"name":"packed-smoke","scripts":{"test":"node -e 0"}}\\n' > package.json
+          "$TMP/node_modules/.bin/agent-baton" init --yes --agents claude,codex --test-cmd 'node -e "process.exit(0)"'
+          node .baton/runtime/bin/baton.js doctor
+          node .baton/runtime/bin/baton.js check
       - name: Retain package manifest
         uses: actions/upload-artifact@v4
         with:
