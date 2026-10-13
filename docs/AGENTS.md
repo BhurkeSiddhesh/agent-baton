@@ -37,7 +37,8 @@ Always, regardless of agent:
 | `AGENTS.md` | managed block (`<!-- baton:begin vN -->` ... `<!-- baton:end -->`) with the protocol, roster, rules and command cheat-sheet; your own content outside the block is preserved |
 | `.baton/config.json`, `.baton/plan.json` | roster and settings; empty valid plan |
 | `.baton/prompts/{orchestrator,worker,reviewer,auditor}.md` | standalone role prompts |
-| `.baton/runtime/` | vendored copy (`bin/`, `src/`, `templates/`, `package.json`) so no install is needed |
+| `.baton/LICENSE` | upstream MIT notice for all generated adapter files (also when using `--no-vendor`) |
+| `.baton/runtime/` | vendored copy (`bin/`, `src/`, `templates/`, `package.json`, `LICENSE`) so no install is needed |
 | `.baton/baton`, `.baton/baton.cmd` | shell and Windows shims for the runtime |
 | `.baton/manifest.json` | every file written, with SHA-256 and whether it is a managed block |
 | `.gitignore`, `.gitattributes` | managed blocks: ignore `.baton/state/` and `.baton/views/`; mark the ledger generated and pin shim line endings (skipped with `--no-git-ignore`) |
