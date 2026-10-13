@@ -3,6 +3,7 @@ name: ci
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
 
 permissions:
@@ -33,7 +34,110 @@ jobs:
           git config --global user.email "ci@example.invalid"
           git config --global user.name "ci"
           git config --global init.defaultBranch main
-      - run: npm test
+      - name: Full regression suite
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee full-test.log
+      - name: Upload failed test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-test-${{ matrix.os }}-node${{ matrix.node }}
+          path: full-test.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  unit:
+    name: unit tests (linux, node 20)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Unit tests
+        run: node --test tests/lib-*.test.js
+
+  integration:
+    name: integration and end-to-end (linux, node 20)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Git identity for isolated integration fixtures
+        run: |
+          git config --global user.email "ci@example.invalid"
+          git config --global user.name "ci"
+          git config --global init.defaultBranch main
+      - name: CLI and integration tests
+        run: node --test tests/cmd-*.test.js tests/e2e.test.js
+
+  security:
+    name: security regressions (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Git identity for security fixtures
+        shell: bash
+        run: |
+          git config --global user.email "ci@example.invalid"
+          git config --global user.name "ci"
+          git config --global init.defaultBranch main
+      - name: Security regression suite
+        shell: bash
+        run: |
+          set -o pipefail
+          node --test tests/cmd-exec-guard.test.js tests/lib-secrets.test.js tests/security-model-docs.test.js 2>&1 | tee security-test.log
+      - name: Upload security failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-${{ matrix.os }}
+          path: security-test.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  package:
+    name: package integrity and offline install
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Pack distribution without publishing
+        run: npm pack --json > pack.json
+      - name: Check archive manifest, required runtime and forbidden files
+        run: node .github/scripts/validate-package.mjs pack.json
+      - name: Verify installation from the actual tarball offline
+        shell: bash
+        run: |
+          set -eu
+          TARBALL="$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync("pack.json", "utf8"))[0].filename)')"
+          TMP="$(mktemp -d)"
+          cd "$TMP"
+          npm install --offline --ignore-scripts --no-audit --no-fund "$GITHUB_WORKSPACE/$TARBALL"
+          node node_modules/agent-baton/bin/baton.js version
+      - name: Retain package manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-manifest
+          path: pack.json
+          retention-days: 7
 
   smoke:
     name: smoke init and doctor (${{ matrix.os }})
@@ -83,3 +187,23 @@ jobs:
         run: |
           node .github/scripts/gen-commands.mjs
           git diff --exit-code docs/COMMANDS.md
+
+  release_ready:
+    name: release gate (all required checks)
+    # This is a tag validation gate, not a publisher. A release workflow must
+    # depend on its successful result before creating any release artifacts.
+    if: always() && startsWith(github.ref, 'refs/tags/v')
+    needs: [test, unit, integration, security, package, smoke, docs]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse incomplete or unsuccessful checks
+        shell: bash
+        run: |
+          set -eu
+          for result in "${{ needs.test.result }}" "${{ needs.unit.result }}" "${{ needs.integration.result }}" "${{ needs.security.result }}" "${{ needs.package.result }}" "${{ needs.smoke.result }}" "${{ needs.docs.result }}"; do
+            if [ "$result" != "success" ]; then
+              echo "release blocked: a required job did not succeed (result=$result)" >&2
+              exit 1
+            fi
+          done
+          echo "All required checks passed for tag ${GITHUB_REF_NAME}."
