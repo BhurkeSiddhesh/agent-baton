@@ -23,7 +23,7 @@ The same nine rules are written into `AGENTS.md` and every adapter file by `init
 5. A different agent reviews and records a verdict with evidence.
 6. Auditors file findings and never edit audited files. Authors fix and resolve; filers confirm.
 7. Repeated rejections escalate to the orchestrator.
-8. The orchestrator plans, assigns, keeps the queue deep, rotates reviewers and closes the day with `digest`.
+8. The orchestrator plans, assigns, keeps the queue deep, rotates reviewers, **commits the final ledger events onto the integration branch**, and closes the day with `digest`.
 9. Empty queue: audit mode.
 
 ## Roles
@@ -82,6 +82,8 @@ Dependency rules:
 - A dependency in `needs_done` must be `ACCEPTED` first.
 - A closed `gate` blocks starting (default `gate_mode: start`).
 
+Create the packet branch **from the current integration branch tip** (not a stale or unrelated feature branch):
+`git switch main && git pull --ff-only && git switch -c baton/<packet-id>-<slug>`.
 Work on a branch named `baton/<packet-id>-<slug>` (the default `branches.packetPrefix` is `baton/`). That makes
 `verify` exact (`git-branch` mode) and lets the CI workflow find the packet.
 
@@ -256,3 +258,22 @@ baton render          # refresh .baton/views/*.md
 
 `0` ok, `1` a rule was violated or a check failed, `2` usage error, `3` internal error. Errors go to stderr; `--json`
 output goes to stdout as exactly one document.
+
+## Publishing final events and working across worktrees
+
+`merge` moves the integration branch to the reviewed implementation commit. The later verification, sign-off, verdict
+and merged events remain in the Git-common-directory local store until published; they are **not** in that commit.
+After merging, switch to (or use) the integration-branch worktree, run `baton ledger export` and
+`baton ledger verify`, inspect `git diff --cached` after `git add .baton/ledger/`, then commit and push the
+ledger-only changes. Fresh clones must see the persisted events before trusting their packet status.
+
+Only worktrees of **one Git clone** share the local event store; `.baton/plan.json` remains branch-specific.
+If an orchestrator publishes new assignments on `main`, each idle worker must update its worktree's plan from
+`main` (for example `git merge --ff-only main` where legal), or use a new worktree created from updated
+`main`, **before** calling `baton next`. Do not assume that events alone update packet definitions.
+
+Accepted packets cannot be reverified after `sync`. If main moved, create and independently verify a new
+replacement packet based on its current tip. The original accepted packet remains historical and **unmerged**.
+
+For cloud dispatch, create the GitHub `baton` label once with `gh label create baton`; ensure `--to` matches
+its assigned worker before dispatch. Author changes require `baton handoff` and an independent reviewer.
