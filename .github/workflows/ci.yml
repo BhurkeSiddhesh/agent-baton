@@ -57,6 +57,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Git identity for unit fixtures
+        run: |
+          git config --global user.email "ci@example.invalid"
+          git config --global user.name "ci"
+          git config --global init.defaultBranch main
       - name: Unit tests
         run: node --test tests/lib-*.test.js
 
