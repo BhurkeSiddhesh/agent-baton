@@ -69,6 +69,23 @@ jobs:
           node .baton/runtime/bin/baton.js status --json
           node .baton/runtime/bin/baton.js uninstall --yes --dry-run
 
+      - name: Unicode, spaces and CRLF (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: node .github/scripts/platform-smoke.mjs
+      - name: PowerShell compatibility
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: node .github/scripts/platform-smoke.mjs
+      - name: cmd.exe compatibility
+        if: matrix.os == 'windows-latest'
+        shell: cmd
+        run: node .github/scripts/platform-smoke.mjs
+      - name: Git Bash compatibility
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: node .github/scripts/platform-smoke.mjs
+
   docs:
     name: docs links and generated commands
     runs-on: ubuntu-latest
