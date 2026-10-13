@@ -280,3 +280,21 @@ test('publishing ledger to main persists reviewed and merged packet state in a f
   assert.ok(readEvents(fresh).some((e) => e.kind === 'merged' && e.packet === 'WP-001'));
   assert.equal((await cli(fresh, ['ledger', 'verify'])).status, 0);
 });
+
+test('sync allows branch rebases when accepted ancestor has already been merged into main', async () => {
+  const r = repo();
+  await submitOnBranch(r);
+  assert.equal((await cli(r.root, ['accept', 'WP-001', '--by', 'claude'])).status, 0);
+  assert.equal((await cli(r.root, ['merge', 'WP-001', '--by', 'claude'])).status, 0);
+  r.git('checkout', '-q', 'main');
+  r.git('checkout', '-q', '-b', 'track/follow-up');
+  r.write('docs/follow-up.md', 'branch work\n');
+  r.commitAll('follow-up on integrated feature');
+  r.git('checkout', '-q', 'main');
+  r.write('docs/new-main.md', 'upstream work\n');
+  const mainHead = r.commitAll('new upstream commit');
+  r.git('checkout', '-q', 'track/follow-up');
+  const result = await cli(r.root, ['sync']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(r.git('merge-base', '--is-ancestor', mainHead, 'HEAD') ?? '', '');
+});
