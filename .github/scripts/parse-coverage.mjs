@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 export function parseCoverage(text) {
   // Node's built-in test coverage table has an "all files" summary row.
-  const match = String(text).match(/^\s*#?\s*all files\s*\|\s*(\d+(?:\.\d+)?)\s*\|\s*(\d+(?:\.\d+)?)\s*\|\s*(\d+(?:\.\d+)?)/m);
+  const match = String(text).match(/^\s*[#ℹ]?\s*all files\s*\|\s*(\d+(?:\.\d+)?)\s*\|\s*(\d+(?:\.\d+)?)\s*\|\s*(\d+(?:\.\d+)?)/m);
   if (!match) return null;
   const [line, branch, functionPct] = match.slice(1).map(Number);
   if ([line, branch, functionPct].some((n) => n < 0 || n > 100 || !Number.isFinite(n))) return null;

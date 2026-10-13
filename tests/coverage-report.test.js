@@ -9,6 +9,14 @@ test('Node aggregate coverage is parsed into machine-readable metrics without fa
   assert.deepEqual(parseCoverage(report), {
     line: 85.36, branch: 72.25, function: 91, source: 'node --test --experimental-test-coverage', thresholdsEnforced: false,
   });
+  const ttyReport = 'ℹ file | line % | branch % | funcs % | uncovered lines\nℹ src/lib/x.js | 92 | 82 | 95 | 4\nℹ all files | 85.36 | 72.25 | 91.00 |\n';
+  assert.deepEqual(parseCoverage(ttyReport), {
+    line: 85.36, branch: 72.25, function: 91, source: 'node --test --experimental-test-coverage', thresholdsEnforced: false,
+  });
+  const plainReport = 'all files | 85.36 | 72.25 | 91.00 |\n';
+  assert.deepEqual(parseCoverage(plainReport), {
+    line: 85.36, branch: 72.25, function: 91, source: 'node --test --experimental-test-coverage', thresholdsEnforced: false,
+  });
   assert.equal(parseCoverage('not a Node report'), null);
   assert.equal(parseCoverage('# all files | 110 | 2 | 3 |'), null);
 });
