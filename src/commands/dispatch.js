@@ -52,6 +52,9 @@ export async function run(ctx, args) {
   const packet = plan.packets.find((p) => p.id === pid);
   if (!packet) throw new BatonError(`unknown packet ${pid}`, { code: 'UNKNOWN_PACKET' });
   const s = state.packets[pid];
+  if (to !== 'any' && s.agent !== to) {
+    throw new BatonError(`${pid} is assigned to ${s.agent || 'no agent'}, not ${to}; reassign its author (and ensure a different reviewer) before dispatching to ${to}`, { code: 'DISPATCH_AGENT_MISMATCH' });
+  }
   if (['ACCEPTED', 'ACCEPTED_WITH_FIXES', 'READY_FOR_REVIEW'].includes(s.status)) {
     throw new BatonError(`${pid} is ${s.status}; there is nothing left to dispatch`, { code: 'BAD_TRANSITION' });
   }
