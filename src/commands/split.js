@@ -48,7 +48,7 @@ const KNOWN_RUNNERS = {
 
 /** Known agents use literal argument arrays. Only an explicitly approved custom command uses a shell. */
 export function resolveRunner(name) {
-  const known = KNOWN_RUNNERS[name];
+  const known = Object.hasOwn(KNOWN_RUNNERS, name) ? KNOWN_RUNNERS[name] : null;
   if (known) return { file: known[0], args: [...known[1]], command: RUNNERS[name], shell: false, custom: false };
   return { file: String(name), args: [], command: String(name), shell: true, custom: true };
 }
