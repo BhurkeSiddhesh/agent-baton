@@ -36,6 +36,7 @@ The canonical [multi-agent security model](docs/SECURITY_MODEL.md) documents the
 - **Ledger integrity.** Each event carries a SHA-256; `baton check` detects edited events. Deleted events are detectable
   only by comparing the two ledger copies. The ledger is not a signed or tamper-proof audit log against a malicious
   committer.
+- **Agent runner.** Built-in `split --run` providers use fixed argument arrays, with prompt text on stdin. Custom `--run` shell strings require the explicit `--allow-shell` flag. This is a confirmation gate, not a sandbox.
 - **Test command.** `baton verify` runs `test.command` from `.baton/config.json` through your shell. Treat that file like
   any build script: review changes to it in pull requests.
 - **Cloud workflows.** Generated GitHub workflows reference secrets (`ANTHROPIC_API_KEY`) and request minimal

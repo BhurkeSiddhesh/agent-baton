@@ -119,6 +119,10 @@ baton render          # STATUS.md, BUS.md, SCOREBOARD.md, PLAN.md in .baton/view
 `baton prompt worker --agent codex` prints a complete role prompt (also available as `.baton/prompts/<role>.md`).
 Paste or pipe it into any agent.
 
+### Custom planning runners and shell authorization
+
+Built-in `split --run claude|codex|gemini` commands use fixed executable/argument arrays. To invoke a **custom shell command**, first inspect `split "goal" --run "your-command" --dry-run`, then explicitly authorize execution with `--allow-shell`. Commands in test configuration or imported packet tests remain executable shell code and must be reviewed before `verify`. Untrusted issue text is never a reason to grant shell authorization.
+
 ## Next
 
 - The full lifecycle and rules: [WORKFLOW.md](WORKFLOW.md)

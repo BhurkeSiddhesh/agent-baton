@@ -7,7 +7,7 @@ import { main } from '../src/cli.js';
 import { memoryStream } from '../src/lib/context.js';
 import { loadPlan } from '../src/lib/plan.js';
 import { readEvents } from '../src/lib/store.js';
-import { extractJsonObjects, extractProposal } from '../src/commands/split.js';
+import { extractJsonObjects, extractProposal, resolveRunner } from '../src/commands/split.js';
 import { makePainter, renderTable, clip, bar, treeSummary } from '../src/lib/views.js';
 import { makeTempRepo, samplePlan } from './helpers.js';
 
@@ -189,14 +189,14 @@ test('split --run feeds the prompt on stdin, saves a validated proposal and neve
       '});',
     ].join('\n'));
     const before = fs.readFileSync(path.join(r.root, '.baton', 'plan.json'), 'utf8');
-    const res = await baton(r.root, ['split', 'Build', 'it', '--run', `node "${agent}"`], { BATON_TEMPLATES_DIR: t.dir });
+    const res = await baton(r.root, ['split', 'Build', 'it', '--run', `node "${agent}"`, '--allow-shell'], { BATON_TEMPLATES_DIR: t.dir });
     assert.equal(res.code, 0, res.err + res.out);
     assert.match(res.out, /proposal saved to \.baton\/proposals\/20261013T100000Z\.json: 2 packet\(s\)/);
     assert.match(res.out, /plan import \.baton\/proposals\/20261013T100000Z\.json/);
     const saved = JSON.parse(fs.readFileSync(path.join(r.root, '.baton', 'proposals', '20261013T100000Z.json'), 'utf8'));
     assert.equal(saved.packets.length, 2);
     assert.equal(fs.readFileSync(path.join(r.root, '.baton', 'plan.json'), 'utf8'), before, 'plan untouched');
-    const again = await baton(r.root, ['split', 'Build it', '--run', `node "${agent}"`, '--json'], { BATON_TEMPLATES_DIR: t.dir });
+    const again = await baton(r.root, ['split', 'Build it', '--run', `node "${agent}"`, '--allow-shell', '--json'], { BATON_TEMPLATES_DIR: t.dir });
     const doc = JSON.parse(again.out);
     assert.equal(doc.ok, true);
     assert.match(doc.proposal, /20261013T100000Z-2\.json$/);
@@ -211,21 +211,21 @@ test('split --run reports invalid proposals, missing JSON and failing agents', a
     const env = { BATON_TEMPLATES_DIR: t.dir };
     const bad = path.join(r.root, 'bad.mjs');
     fs.writeFileSync(bad, `console.log(JSON.stringify({ packets: [{ title: 'x', owns: ['/abs'] }] }));`);
-    const invalid = await baton(r.root, ['split', 'G', '--run', `node "${bad}"`], env);
+    const invalid = await baton(r.root, ['split', 'G', '--run', `node "${bad}"`, '--allow-shell'], env);
     assert.equal(invalid.code, 1);
     assert.match(invalid.out, /error: .*absolute/);
     assert.ok(fs.readdirSync(path.join(r.root, '.baton', 'proposals')).length >= 1, 'invalid proposals are still kept for hand fixing');
     const none = path.join(r.root, 'none.mjs');
     fs.writeFileSync(none, `console.log('no json at all');`);
-    const nojson = await baton(r.root, ['split', 'G', '--run', `node "${none}"`], env);
+    const nojson = await baton(r.root, ['split', 'G', '--run', `node "${none}"`, '--allow-shell'], env);
     assert.equal(nojson.code, 1);
     assert.match(nojson.err, /no JSON object/);
     const fail = path.join(r.root, 'fail.mjs');
     fs.writeFileSync(fail, `console.error('boom'); process.exit(3);`);
-    const failed = await baton(r.root, ['split', 'G', '--run', `node "${fail}"`], env);
+    const failed = await baton(r.root, ['split', 'G', '--run', `node "${fail}"`, '--allow-shell'], env);
     assert.equal(failed.code, 1);
     assert.match(failed.err, /exited with 3: boom/);
-    const missing = await baton(r.root, ['split', 'G', '--run', 'definitely-not-a-command-xyz'], env);
+    const missing = await baton(r.root, ['split', 'G', '--run', 'definitely-not-a-command-xyz', '--allow-shell'], env);
     assert.equal(missing.code, 1);
   } finally { r.cleanup(); t.cleanup(); }
 });
@@ -268,4 +268,40 @@ test('views: painter honours TTY and NO_COLOR; tables align; helpers are tidy', 
   try {
     assert.equal(treeSummary(r.root), ['a.txt', 'src/ (3 files)', '  src/x/ (2)'].join('\n'));
   } finally { r.cleanup(); }
+});
+
+test('known runners never interpolate goals into shell commands; custom runners require explicit authorization', async () => {
+  for (const key of ['claude', 'codex', 'gemini']) {
+    const runner = resolveRunner(key);
+    assert.equal(runner.shell, false);
+    assert.equal(runner.custom, false);
+    assert.match(runner.command, new RegExp('^' + key));
+    assert.ok(!runner.args.some((x) => /evil-goal/.test(x)));
+  }
+  for (const inherited of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+    const runner = resolveRunner(inherited);
+    assert.equal(runner.custom, true, inherited);
+    assert.equal(runner.shell, true, inherited);
+    assert.equal(runner.command, inherited);
+  }
+  const custom = resolveRunner('node "evil-goal ; unexpected"');
+  assert.equal(custom.shell, true);
+  assert.equal(custom.custom, true);
+
+  const r = makeTempRepo({ config: true, plan: true });
+  const t = templates();
+  try {
+    const env = { BATON_TEMPLATES_DIR: t.dir };
+    const denied = await baton(r.root, ['split', 'G', '--run', 'node -e "process.exit(0)"'], env);
+    assert.equal(denied.code, 2);
+    assert.match(denied.err, /--allow-shell/);
+    assert.equal(fs.existsSync(path.join(r.root, '.baton', 'proposals')), false);
+
+    const preview = JSON.parse((await baton(r.root, ['split', 'G', '--run', 'node -e "process.exit(0)"', '--dry-run', '--json'], env)).out);
+    assert.equal(preview.requiresAllowShell, true);
+    assert.equal(preview.shell, true);
+    const safe = JSON.parse((await baton(r.root, ['split', 'G', '--run', 'codex', '--dry-run', '--json'], env)).out);
+    assert.equal(safe.shell, false);
+    assert.equal(safe.requiresAllowShell, false);
+  } finally { r.cleanup(); t.cleanup(); }
 });

@@ -271,7 +271,7 @@ Examples:
 ### baton split
 
 ```text
-baton split "<goal>" [--run <claude|codex|gemini|command>] [--out file] [--dry-run]
+baton split "<goal>" [--run <claude|codex|gemini|command>] [--allow-shell] [--out file] [--dry-run]
 
 Build the planning prompt for a goal, optionally run an agent CLI on it
 
@@ -279,10 +279,12 @@ Builds the orchestrator prompt (goal, repo tree, roster, rules, plan schema) fro
 Without --run the prompt is printed (or written to --out). With --run the named agent CLI is started non-interactively,
 the prompt goes to its stdin, the first JSON object of its output is validated as a proposal and saved to
 .baton/proposals/<timestamp>.json. Nothing is applied: run "baton plan import <file>" to apply it.
-Known runners: claude ("claude -p"), codex ("codex exec -"), gemini ("gemini -p ..."). Any other value is run as a shell command.
+Known runners: claude, codex and gemini run with fixed argument arrays (without a shell).
+Custom commands require --allow-shell before execution; treat them as trusted local code.
 
 Options:
-      --run <v>      agent CLI to run: claude|codex|gemini or a custom command
+      --run <v>      agent CLI to run: claude|codex|gemini or a custom shell command
+      --allow-shell  explicitly permit running custom --run through the OS shell
       --out <v>      write the prompt to this file
       --dry-run      with --run: print the command and do not execute it
       --timeout <n>  with --run: seconds to wait for the agent (default: 900)
