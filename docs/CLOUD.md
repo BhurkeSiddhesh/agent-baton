@@ -128,10 +128,15 @@ See also: [WORKFLOW.md](WORKFLOW.md), [AGENTS.md](AGENTS.md), [TROUBLESHOOTING.m
 
 ## Dispatch prerequisites and attribution safety
 
-For a new GitHub repository, first run `gh auth login` and create the label once with
-`gh label create baton --color 0969da` (skip if already present). `baton init --cloud` writes workflow
+For the **destination GitHub repository**, first run `gh auth login` and create the label once with
+`gh label create baton --repo owner/name --color 0969da` (replace owner/name with the destination; skip if already
+present). If dispatching without `--repo`, you may omit `--repo` from the label command when already inside the
+actual destination repository. `baton init --cloud` writes workflow
 files but does not create repository labels. Run `baton review WP-001` or inspect the plan's assignment before
-`baton dispatch WP-001 --to <provider>`. The provider must match the packet's **assigned author**;
-`dispatch` refuses a mismatch even during dry-run. To change author, use an authorized `baton handoff` and
+`baton dispatch WP-001 --to <provider>`. The provider must match the packet's **assigned author's provider kind**;
+`dispatch` refuses a mismatch even during dry-run and retains the exact assigned ID in the issue brief.
+For a custom roster ID like `claude-a` with `kind: claude`, `--to claude` can generate the brief, but your
+runner must set `BATON_AGENT=claude-a`. The generated `baton-claude` workflow currently hard-codes `claude`;
+customize it before using it with custom IDs. To change author, use an authorized `baton handoff` and
 ensure the assigned reviewer is different (reassign if necessary). A GitHub issue or `@claude` mention alone
 does not confirm a runner has executed the packet.
