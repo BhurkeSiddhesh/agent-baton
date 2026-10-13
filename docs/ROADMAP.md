@@ -6,6 +6,14 @@ This index links the **88 individually tracked engineering issues** created from
 
 **How to execute this roadmap:** Work through release stabilization and security before enabling unattended execution. The existing CLI coordinates workers, but its adapters do not automatically start coding-agent sessions. See the [README feature walkthrough](../README.md#from-a-feature-request-to-merged-code-who-orchestrates-and-how-do-agents-pick-up-work).
 
+## Issue intake and prioritization
+
+Before creating a task, search the [issue tracker](https://github.com/BhurkeSiddhesh/agent-baton/issues) and this roadmap for duplicates. Use the engineering-task form for a new scoped work item, the bug form for reproducible defects, and the feature form for user-facing requests; sensitive vulnerabilities belong in [private reporting](../SECURITY.md).
+
+**Triage cycle:** the maintainer reviews newly submitted issues at least once per release cycle, checks reproduction/evidence and prerequisites, and assigns P0–P3 plus M1–M5 before scheduling work. Prioritize P0 safety and release blockers, then unblocked P1 items; do not start dependents merely because an issue was filed. Close duplicates with a link to the canonical issue, keep partial PRs open with remaining checkboxes, and prefer one issue/one reviewable PR unless closely coupled.
+
+**PR acceptance:** a contributor references the issue using `Closes #number` only when all criteria are implemented, otherwise `Refs #number`. A maintainer independently verifies tests, CI, security implications and backward compatibility before merge. A generated agent summary or green local `baton verify` is not a substitute for GitHub approvals. Revisit priorities and duplicates after each release.
+
 ## 01 — Release stabilization and tests
 
 Restore a green supported-platform CI matrix, safe installation and reproducible releases.
