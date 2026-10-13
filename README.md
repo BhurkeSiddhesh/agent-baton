@@ -219,7 +219,7 @@ or pull-request approval in a hosted repository.
 **End-to-end mental model:** You request a feature → Baton helps produce a plan → a human accepts it → agents **you
 start or explicitly dispatch** read `next`, claim scoped packets, code and verify → another agent reviews → the
 orchestrator merges accepted work. A fully autonomous "submit one sentence and watch an agent office work" controller
-is a [future roadmap](https://github.com/BhurkeSiddhesh/agent-baton/issues), not a current built-in feature.
+is a [future roadmap](docs/ROADMAP.md), not a current built-in feature.
 
 ## Example session
 
@@ -259,6 +259,7 @@ codex       0      0    0      0    0       0           -          1(9)
 ## Documentation
 
 - [Quickstart](docs/QUICKSTART.md) - install, plan, run your first packet
+- [Engineering roadmap](docs/ROADMAP.md) - 88 scoped issues, priorities, prerequisites and release phases
 - [Concepts](docs/CONCEPTS.md) - agents, tracks, packets, gates, ledger, bus
 - [Workflow](docs/WORKFLOW.md) - the full lifecycle and the review rules
 - [Commands](docs/COMMANDS.md) - every command and flag, from the real `--help`
