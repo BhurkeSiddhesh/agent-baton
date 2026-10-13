@@ -28,6 +28,22 @@ and Linux.
 
 **Security boundary:** Agent Baton is **not a sandbox** or an identity/authorization system. Packet ownership, hooks, review names and ledger hashes reduce coordination errors but do not contain an agent with shell or repository-write access. Run untrusted workers with OS-level isolation and protect merges through GitHub policies. See the [security model](docs/SECURITY_MODEL.md) for enforced checks, bypasses and deployment guidance.
 
+## What Baton actually does today
+
+**Coordination, not unattended execution.** Baton turns an approved development plan into small, file-scoped packets with leases, checks and a replayable review trail. It does not create or manage live agent processes by itself. The CLI and generated adapters work with agents **you start**, and cloud dispatch requires working provider integrations.
+
+| User action | Supported now | Additional operator/provider work |
+|---|---|---|
+| Describe a feature | `split` produces a planning prompt or an optional agent-generated proposal | Inspect the proposal and explicitly import/approve it |
+| Divide and assign work | Plan validation, assignment, dependencies and `next` queue | Start agent sessions; isolate each worker's branch/worktree |
+| Implement a packet | `begin`, scoped file checks, secret scan, tests, `submit` | Agents perform coding; no implicit background scheduler |
+| Review and integrate | Separate named reviewer, verdict, local fast-forward `merge`, ledger mirror | Independently verify CI and platform approvals; publish ledger and push |
+| Dispatch remotely | `dispatch` creates an issue and optional cloud workflows supply prompts | Configure `gh`, credentials/permissions and the remote coding provider; an issue alone does not guarantee execution |
+
+**Before vs. after:** Without Baton you coordinate files, owners, handoffs and verification manually across agent sessions. With Baton you can track those decisions in a shared plan and ledger, see which packet is ready, and reject out-of-scope changes at the verify gate. It **does not** replace shell isolation, GitHub branch rules, trusted human review or a process supervisor.
+
+For the full working example—from request to proposal, approval, `next`, `begin`, `verify`, review and merge—see [the feature-request walkthrough](#from-a-feature-request-to-merged-code-who-orchestrates-and-how-do-agents-pick-up-work). See the [security model](docs/SECURITY_MODEL.md) for the trust boundaries and the [roadmap](docs/ROADMAP.md) for unattended-agent features that are still proposals.
+
 ## 60-second quickstart
 
 ```bash
