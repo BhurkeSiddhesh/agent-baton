@@ -26,6 +26,8 @@ cloud agents. Claude Code, Codex, Gemini CLI, Antigravity, Cursor, Copilot, Wind
 get thin adapter files that point at the same protocol. Zero runtime dependencies, Node 18 or newer, Windows, macOS
 and Linux.
 
+**Security boundary:** Agent Baton is **not a sandbox** or an identity/authorization system. Packet ownership, hooks, review names and ledger hashes reduce coordination errors but do not contain an agent with shell or repository-write access. Run untrusted workers with OS-level isolation and protect merges through GitHub policies. See the [security model](docs/SECURITY_MODEL.md) for enforced checks, bypasses and deployment guidance.
+
 ## 60-second quickstart
 
 ```bash
@@ -305,6 +307,7 @@ codex       0      0    0      0    0       0           -          1(9)
 - [Cloud agents](docs/CLOUD.md) - ledger mirror, branches, dispatch, GitHub workflows
 - [Plan format](docs/PLAN_FORMAT.md) - `plan.json` and `config.json` reference
 - [FAQ](docs/FAQ.md) and [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Security model](docs/SECURITY_MODEL.md) - trust boundaries, enforcement limits, threat scenarios and safer operation
 - [Changelog](CHANGELOG.md), [Contributing](CONTRIBUTING.md), [Security](SECURITY.md), [Code of Conduct](CODE_OF_CONDUCT.md)
 - Internals for contributors: [docs/internals/SPEC.md](docs/internals/SPEC.md), [LIB_API](docs/internals/LIB_API.md), [BRAND](docs/internals/BRAND.md)
 
