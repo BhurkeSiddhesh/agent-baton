@@ -125,3 +125,13 @@ be installed because the runtime is vendored in `.baton/runtime/`.
   the enforcement.
 
 See also: [WORKFLOW.md](WORKFLOW.md), [AGENTS.md](AGENTS.md), [TROUBLESHOOTING.md](TROUBLESHOOTING.md#cloud).
+
+## Dispatch prerequisites and attribution safety
+
+For a new GitHub repository, first run `gh auth login` and create the label once with
+`gh label create baton --color 0969da` (skip if already present). `baton init --cloud` writes workflow
+files but does not create repository labels. Run `baton review WP-001` or inspect the plan's assignment before
+`baton dispatch WP-001 --to <provider>`. The provider must match the packet's **assigned author**;
+`dispatch` refuses a mismatch even during dry-run. To change author, use an authorized `baton handoff` and
+ensure the assigned reviewer is different (reassign if necessary). A GitHub issue or `@claude` mention alone
+does not confirm a runner has executed the packet.
