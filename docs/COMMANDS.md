@@ -758,7 +758,7 @@ baton sync [--json]
 
 Rebase the current track branch onto main
 
-Refuses on main, with uncommitted work, or in detached HEAD. A conflicting rebase is aborted and the branch is left untouched. Verify again afterwards: the commit changed.
+Refuses on main, dirty or detached branches, and branches containing accepted commits. A conflicting rebase is aborted. Active packets must begin a new verification lifecycle after rebasing; accepted packets require a new packet.
 
 Options:
       --json      print a JSON document
@@ -772,7 +772,7 @@ baton merge <packet> --by <orchestrator> [--json]
 
 Fast-forward main to an ACCEPTED packet commit (never creates merge commits)
 
-Only ACCEPTED packets with a recorded commit, and only when main is an ancestor of that commit. If main moved, rebase with "baton sync" and review again.
+Only ACCEPTED packets recorded from the integration tip; main must fast-forward to the exact reviewed commit. If main moved, create and review a replacement packet from updated main (accepted packets cannot simply be resubmitted). Publish ledger events on main after merge.
 
 Options:
       --by <v>     the orchestrator (or BATON_AGENT)
