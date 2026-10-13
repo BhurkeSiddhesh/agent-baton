@@ -13,6 +13,8 @@ You will get an acknowledgement within a few days. Fixes are released as patch v
 
 ## Supported versions
 
+See [governance and compatibility policy](docs/GOVERNANCE.md) for the security fix approval, hotfix exception, schema migration and release responsibilities. Private vulnerability reports should not be duplicated into public issue descriptions.
+
 Only the latest released version receives security fixes while the project is below 1.0.
 
 ## Threat model and design
