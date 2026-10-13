@@ -7,16 +7,48 @@
     "baton": "bin/baton.js",
     "agent-baton": "bin/baton.js"
   },
-  "files": ["bin", "src", "templates", "assets", "docs", "README.md", "LICENSE", "CHANGELOG.md"],
-  "engines": { "node": ">=18" },
+  "files": [
+    "bin",
+    "src",
+    "templates",
+    "assets",
+    "docs",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "CODE_OF_CONDUCT.md",
+    "CONTRIBUTING.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "test": "node --test",
     "baton": "node bin/baton.js"
   },
-  "keywords": ["ai", "agents", "orchestration", "multi-agent", "claude-code", "codex", "gemini", "cursor", "copilot", "antigravity", "workflow", "agents-md"],
+  "keywords": [
+    "ai",
+    "agents",
+    "orchestration",
+    "multi-agent",
+    "claude-code",
+    "codex",
+    "gemini",
+    "cursor",
+    "copilot",
+    "antigravity",
+    "workflow",
+    "agents-md"
+  ],
   "author": "Siddhesh Bhurke",
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/BhurkeSiddhesh/agent-baton.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BhurkeSiddhesh/agent-baton.git"
+  },
   "homepage": "https://github.com/BhurkeSiddhesh/agent-baton#readme",
-  "bugs": { "url": "https://github.com/BhurkeSiddhesh/agent-baton/issues" }
+  "bugs": {
+    "url": "https://github.com/BhurkeSiddhesh/agent-baton/issues"
+  }
 }
