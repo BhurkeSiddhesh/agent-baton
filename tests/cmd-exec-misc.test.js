@@ -207,3 +207,14 @@ test('buildBrief falls back sensibly for unassigned packets', () => {
   assert.ok(brief.includes('The change is complete and the tests pass'));
   assert.ok(brief.includes('baton/WP-9'));
 });
+
+test('dispatch refuses a provider that differs from assigned author (including dry-run)', async () => {
+  const r = repo();
+  const wrong = await cli(r.root, ['dispatch', 'WP-001', '--to', 'claude', '--dry-run']);
+  assert.equal(wrong.status, 1);
+  assert.match(wrong.stderr, /assigned to codex, not claude/);
+  const correct = await cli(r.root, ['dispatch', 'WP-001', '--to', 'codex', '--dry-run', '--json']);
+  assert.equal(correct.status, 0, correct.stderr);
+  assert.equal(json(correct).to, 'codex');
+  assert.match(json(correct).body, /BATON_AGENT=codex/);
+});
