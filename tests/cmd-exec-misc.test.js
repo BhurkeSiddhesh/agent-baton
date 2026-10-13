@@ -2,7 +2,7 @@ import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { makeTempRepo, samplePlan } from './helpers.js';
+import { makeTempRepo, samplePlan, sampleConfig } from './helpers.js';
 import { main } from '../src/cli.js';
 import { memoryStream } from '../src/lib/context.js';
 import { stateDir } from '../src/lib/store.js';
@@ -170,7 +170,13 @@ test('dispatch --dry-run prints the gh command and a complete brief, and changes
 });
 
 test('dispatch targets: mentions, assignee, repo flag, JSON', async () => {
-  const r = repo();
+  const plan = samplePlan();
+  plan.packets[2].agent = 'copilot';
+  const config = sampleConfig();
+  config.agents.push({ id: 'copilot', name: 'Copilot', kind: 'copilot', roles: ['worker', 'reviewer'], strengths: [] });
+  const r = repo({ plan, config });
+  assert.equal((await cli(r.root, ['reassign', 'WP-001', '--reviewer', 'gemini', '--by', 'claude'])).status, 0);
+  assert.equal((await cli(r.root, ['handoff', 'WP-001', '--to', 'claude', '--by', 'claude'])).status, 0);
   const claude = json(await cli(r.root, ['dispatch', 'WP-001', '--to', 'claude', '--repo', 'me/proj', '--dry-run', '--json']));
   assert.equal(claude.dryRun, true);
   assert.deepEqual(claude.command.slice(0, 3), ['gh', 'issue', 'create']);
@@ -179,8 +185,8 @@ test('dispatch targets: mentions, assignee, repo flag, JSON', async () => {
   assert.ok(!claude.command.includes('--assignee'));
   const copilot = json(await cli(r.root, ['dispatch', 'WP-003', '--to', 'copilot', '--dry-run', '--json']));
   assert.ok(copilot.command.join(' ').includes('--assignee @copilot'));
-  assert.ok(copilot.body.includes('BATON_AGENT=gemini'));
-  const codex = json(await cli(r.root, ['dispatch', 'WP-001', '--to', 'codex', '--dry-run', '--json']));
+  assert.ok(copilot.body.includes('BATON_AGENT=copilot'));
+  const codex = json(await cli(r.root, ['dispatch', 'WP-002', '--to', 'codex', '--dry-run', '--json']));
   assert.ok(codex.body.startsWith('@codex'));
   const any = json(await cli(r.root, ['dispatch', 'WP-001', '--dry-run', '--json']));
   assert.ok(any.body.startsWith('# WP-001'));
