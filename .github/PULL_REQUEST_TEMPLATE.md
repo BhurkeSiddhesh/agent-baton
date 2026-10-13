@@ -1,23 +1,36 @@
-## What and why
+## Related issue and objective
 
-<!-- One or two sentences: the behaviour change and the reason. Link the issue. -->
+Closes #<!-- required: replace with the issue number when all acceptance criteria are met; otherwise use Refs #... -->
 
-## Checklist
+**Change:** <!-- what changed and why, in two or three sentences -->
 
-- [ ] `npm test` passes on my platform (paste the summary line below)
-- [ ] New or changed behaviour has tests, including the main refusal paths
-- [ ] Zero runtime dependencies, Node 18 compatible, no network access, works on Windows
-- [ ] Generated files and installer changes stay idempotent and non-destructive
-- [ ] `docs/` updated; `docs/COMMANDS.md` regenerated if a command changed (`node .github/scripts/gen-commands.mjs`)
-- [ ] `CHANGELOG.md` updated under Unreleased
-- [ ] No secrets, tokens or personal data in code, tests or fixtures
+## Acceptance criteria
 
-## Test output
+- [ ] Relevant issue criteria are satisfied (link evidence for each; disclose any incomplete criteria)
+- [ ] Tests cover success, negative/refusal, recovery and regression scenarios where applicable
+- [ ] `npm test` and applicable CI jobs pass on supported platforms; link run(s) below
 
-```text
-paste the tail of npm test here
-```
+## Evidence
 
-## Notes for reviewers
+- **Local verification:** <!-- exact commands and concise output; do not mark green if not run -->
+- **CI run:** <!-- URL; mark pending until finished -->
+- **Reproduction before / after:** <!-- for a bug; otherwise N/A -->
 
-<!-- Anything risky, any new exit code or refusal, anything you were unsure about. -->
+## Compatibility and Rollback
+
+<!-- CLI/JSON schemas, config, ledger, release/install compatibility; migration needed? How to recover? -->
+
+## Security
+
+<!-- New shells, prompts, tools, trust boundaries, permissions, secret handling, protected paths, dependencies? None with rationale. -->
+
+## Review
+
+- [ ] Changed command help and generated docs regenerated if applicable
+- [ ] No dependency or network requirement introduced into the offline core (or explicitly justified)
+- [ ] Installer changes remain non-destructive and are tested if applicable
+- [ ] Security and identity assumptions are documented; Baton actor names are not authenticated approval
+- [ ] Independent reviewer inspects diff, actual CI and issue criteria; no self-approval
+- [ ] `CHANGELOG.md` updated under Unreleased or a rationale given
+
+**Risk / reviewer focus:** <!-- concise explanation; include rollout/rollback owner -->

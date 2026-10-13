@@ -1,0 +1,74 @@
+name: Engineering task
+description: Scoped roadmap item with dependencies and verifiable completion criteria
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Propose one independently reviewable increment. Search the roadmap and existing issues before opening duplicates.
+        Never paste credentials, customer data, or private vulnerability details here; use private security reporting.
+  - type: input
+    id: objective
+    attributes:
+      label: Objective
+      description: A measurable outcome, not a list of tools to use
+      placeholder: "Ensure ... so that ..."
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - P0 - release blocker or security-critical
+        - P1 - core reliability or capability
+        - P2 - usability or scale
+        - P3 - optional integration
+    validations:
+      required: true
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Roadmap phase
+      options:
+        - M1 - Stable CLI
+        - M2 - Trust and coordination
+        - M3 - Autonomous runner
+        - M4 - Integrations
+        - M5 - Scale and adoption
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: In-scope changes and affected paths
+      description: Include production code, test files and docs as appropriate
+      placeholder: |
+        - src/...
+        - tests/...
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Each criterion should be demonstrable by a test or reviewer observation
+      placeholder: |
+        - [ ] Refuses unsafe input...
+        - [ ] Regression test...
+        - [ ] CI green on supported platforms...
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Prerequisites / related issues
+      description: 'Use navigable #123 references, or state None'
+      placeholder: "#10, #11"
+  - type: textarea
+    id: risks
+    attributes:
+      label: Compatibility, security and rollback
+      description: Note schema/CLI breaking changes, security trust boundaries, migration, and recovery
+    validations:
+      required: true
