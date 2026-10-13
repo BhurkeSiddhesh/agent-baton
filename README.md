@@ -299,6 +299,7 @@ codex       0      0    0      0    0       0           -          1(9)
 ## Documentation
 
 - [Quickstart](docs/QUICKSTART.md) - install, plan, run your first packet
+- [Regression coverage](docs/COVERAGE.md) - Node baseline, raw V8 artifacts and regression policy
 - [Engineering roadmap](docs/ROADMAP.md) - 88 scoped issues, priorities, prerequisites and release phases
 - [Concepts](docs/CONCEPTS.md) - agents, tracks, packets, gates, ledger, bus
 - [Workflow](docs/WORKFLOW.md) - the full lifecycle and the review rules
