@@ -63,7 +63,7 @@ body:
     id: dependencies
     attributes:
       label: Prerequisites / related issues
-      description: Use navigable #123 references, or state None
+      description: 'Use navigable #123 references, or state None'
       placeholder: "#10, #11"
   - type: textarea
     id: risks
