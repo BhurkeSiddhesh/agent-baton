@@ -10,13 +10,14 @@ import { diffValidation, mergeProposal } from './plan.js';
 export const name = 'split';
 export const group = 'Planning';
 export const summary = 'Build the planning prompt for a goal, optionally run an agent CLI on it';
-export const usage = 'baton split "<goal>" [--run <claude|codex|gemini|command>] [--out file] [--dry-run]';
+export const usage = 'baton split "<goal>" [--run <claude|codex|gemini|command>] [--allow-shell] [--out file] [--dry-run]';
 export const description = [
   'Builds the orchestrator prompt (goal, repo tree, roster, rules, plan schema) from templates/prompts/split.md.',
   'Without --run the prompt is printed (or written to --out). With --run the named agent CLI is started non-interactively,',
   'the prompt goes to its stdin, the first JSON object of its output is validated as a proposal and saved to',
   '.baton/proposals/<timestamp>.json. Nothing is applied: run "baton plan import <file>" to apply it.',
-  'Known runners: claude ("claude -p"), codex ("codex exec -"), gemini ("gemini -p ..."). Any other value is run as a shell command.',
+  'Known runners: claude, codex and gemini run with fixed argument arrays (without a shell).',
+  'Custom commands require --allow-shell before execution; treat them as trusted local code.',
 ].join('\n');
 export const examples = [
   'baton split "Ship invoice export" --out prompt.md',
@@ -24,7 +25,8 @@ export const examples = [
   'baton split "Ship invoice export" --run claude',
 ];
 export const options = {
-  run: { type: 'string', description: 'agent CLI to run: claude|codex|gemini or a custom command' },
+  run: { type: 'string', description: 'agent CLI to run: claude|codex|gemini or a custom shell command' },
+  'allow-shell': { type: 'boolean', description: 'explicitly permit running custom --run through the OS shell' },
   out: { type: 'string', description: 'write the prompt to this file' },
   'dry-run': { type: 'boolean', description: 'with --run: print the command and do not execute it' },
   timeout: { type: 'number', description: 'with --run: seconds to wait for the agent', default: 900 },
@@ -36,6 +38,20 @@ export const RUNNERS = {
   codex: 'codex exec -',
   gemini: 'gemini -p "Follow the instructions given on stdin and answer with the JSON object only."',
 };
+
+// Goal and proposal text always go through stdin, never interpolated into command arguments.
+const KNOWN_RUNNERS = {
+  claude: ['claude', ['-p']],
+  codex: ['codex', ['exec', '-']],
+  gemini: ['gemini', ['-p', 'Follow the instructions given on stdin and answer with the JSON object only.']],
+};
+
+/** Known agents use literal argument arrays. Only an explicitly approved custom command uses a shell. */
+export function resolveRunner(name) {
+  const known = KNOWN_RUNNERS[name];
+  if (known) return { file: known[0], args: [...known[1]], command: RUNNERS[name], shell: false, custom: false };
+  return { file: String(name), args: [], command: String(name), shell: true, custom: true };
+}
 
 /** All JSON objects found in text (fenced blocks first, then any balanced {...}), in order of appearance. */
 export function extractJsonObjects(text) {
@@ -93,15 +109,25 @@ export async function run(ctx, args) {
     else ctx.out(prompt);
     return 0;
   }
-  const command = RUNNERS[args.run] ?? args.run;
+  const runner = resolveRunner(args.run);
+  const command = runner.command;
+  if (runner.custom && !args['allow-shell'] && !args['dry-run']) {
+    throw new UsageError('custom --run commands execute through the shell; pass --allow-shell to authorize explicitly (or use --dry-run first)');
+  }
   const proposalFile = args['dry-run'] ? null : proposalPath(ctx.root, utcnow());
   if (args['dry-run']) {
     const rel = '.baton/proposals/<timestamp>.json';
-    if (args.json) ctx.json({ goal, dryRun: true, command, stdin: `prompt (${prompt.length} chars)`, proposal: rel, out: outFile ? toPosix(outFile) : null });
-    else ctx.out([`command: ${command}`, `stdin: the split prompt (${prompt.length} chars)${outFile ? `, also written to ${toPosix(outFile)}` : ''}`, `output: first JSON object is validated and saved to ${rel}`, 'dry run: nothing was executed'].join('\n'));
+    if (args.json) ctx.json({ goal, dryRun: true, command, shell: runner.shell, requiresAllowShell: runner.custom, stdin: `prompt (${prompt.length} chars)`, proposal: rel, out: outFile ? toPosix(outFile) : null });
+    else ctx.out([`command: ${command}`, `execution: ${runner.custom ? 'CUSTOM SHELL (requires --allow-shell)' : 'direct executable, no shell'}`, `stdin: the split prompt (${prompt.length} chars)${outFile ? `, also written to ${toPosix(outFile)}` : ''}`, `output: first JSON object is validated and saved to ${rel}`, 'dry run: nothing was executed'].join('\n'));
     return 0;
   }
-  const r = spawnSync(command, { shell: true, input: prompt, encoding: 'utf8', cwd: ctx.root, env: ctx.env, maxBuffer: 256 * 1024 * 1024, timeout: Math.max(1, Number(args.timeout) || 900) * 1000 });
+  if (runner.custom) ctx.err(`baton: executing explicitly authorized custom SHELL command: ${command}`);
+  // Windows npm-installed CLIs expose .cmd launchers: use a fixed command line through cmd.exe.
+  // No untrusted goal or proposal data is ever placed into this static command.
+  const windowsShim = process.platform === 'win32' && !runner.custom;
+  const file = windowsShim ? (process.env.ComSpec || 'cmd.exe') : runner.file;
+  const argv = windowsShim ? ['/d', '/s', '/c', runner.command] : runner.args;
+  const r = spawnSync(file, argv, { shell: runner.shell, input: prompt, encoding: 'utf8', cwd: ctx.root, env: ctx.env, windowsHide: true, maxBuffer: 256 * 1024 * 1024, timeout: Math.max(1, Number(args.timeout) || 900) * 1000 });
   if (r.error) throw new BatonError(`could not run "${command}": ${r.error.code || r.error.message}`, { code: 'RUN_FAILED', hint: 'is the agent CLI installed and on PATH? use --dry-run to see the command' });
   const output = r.stdout || '';
   const rawFile = proposalFile.replace(/\.json$/, '.raw.txt');
