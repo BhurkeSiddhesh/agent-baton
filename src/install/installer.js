@@ -12,7 +12,7 @@ import { detectStack, detectAgents, selectRoster } from './detect.js';
 import { applyBlock, blockText, blockHash, extractBlock, removeBlock } from './managed-block.js';
 import { loadManifest, saveManifest, hashContent, hashFileOnDisk } from './manifest.js';
 import { mergeJson, unmergeJson, stringifyLike } from './hooks.js';
-import { collectRuntime, shims, runningFromRuntime, RUNTIME_COMMAND } from './vendor.js';
+import { collectRuntime, shims, runningFromRuntime, readLicense, RUNTIME_COMMAND } from './vendor.js';
 import { extraApplies, FALLBACK_HOOKS_SNIPPET, postprocess } from './ci.js';
 
 export const SIDECAR_SUFFIX = '.baton-new';
@@ -230,6 +230,8 @@ function buildDesired({ root, env, config, registry, opts, prevManifest }) {
     if (fs.existsSync(path.join(root, 'package.json'))) {
       add({ kind: 'json-key', path: 'package.json', key: 'scripts.baton', value: config.runtime?.vendored ? RUNTIME_COMMAND : 'baton', group: 'core' });
     }
+    // Adapters are MIT-covered even when --no-vendor skips the runtime.
+    add({ kind: 'file', path: '.baton/LICENSE', data: readLicense(), group: 'core' });
     if (opts.vendor) {
       for (const f of collectRuntime({ srcRoot: packageRoot(), templates: registry.templates })) add({ kind: 'file', path: f.rel, data: f.data, group: 'runtime', always: true });
       for (const f of shims()) add({ kind: 'file', path: f.rel, data: f.data, group: 'runtime', always: true, exec: !!f.exec });
@@ -605,6 +607,15 @@ export async function runInstall(ctx, opts = {}) {
   if (opts.dryRun) return result;
 
   // ---- apply (every target is checked first so a refusal leaves the tree untouched)
+  // Legal notices must never write through symlinks or hardlinks into a host LICENSE.
+  for (const rel of ['.baton/LICENSE', '.baton/runtime/LICENSE']) {
+    const abs = path.join(root, rel);
+    let st;
+    try { st = fs.lstatSync(abs); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+    if (st && (st.isSymbolicLink() || st.nlink > 1)) {
+      throw new BatonError(`refusing aliased license target ${rel}; replace the link yourself before installing`, { code: 'UNSAFE_PATH' });
+    }
+  }
   for (const w of writes) if (w.abs && !w.remove) assertInsideRoot(root, w.abs);
   let current = null;
   try {

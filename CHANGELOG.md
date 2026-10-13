@@ -6,6 +6,10 @@ All notable changes to Agent Baton are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Vendored runtime installation now includes its MIT license notice in `.baton/runtime/LICENSE`.
+
 ## [0.1.0] - 2026-10-13
 
 First release.

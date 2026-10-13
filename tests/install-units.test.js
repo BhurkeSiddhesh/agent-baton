@@ -165,6 +165,7 @@ test('collectRuntime copies bin, src and templates and skips tests and node_modu
     for (const [rel, text] of Object.entries({
       'bin/baton.js': '#!/usr/bin/env node\n', 'src/cli.js': 'x', 'src/a.test.js': 'no', 'src/node_modules/m/i.js': 'no', 'src/tests/t.js': 'no',
       'package.json': '{"version":"9.9.9"}',
+      'LICENSE': 'MIT License\n\nCopyright (c) Test\n',
     })) { fs.mkdirSync(path.dirname(path.join(src, rel)), { recursive: true }); fs.writeFileSync(path.join(src, rel), text); }
     const files = collectRuntime({ srcRoot: src, templates: templates() });
     const rels = files.map((f) => f.rel);
@@ -172,6 +173,9 @@ test('collectRuntime copies bin, src and templates and skips tests and node_modu
     assert.ok(rels.includes('.baton/runtime/src/cli.js'));
     assert.ok(rels.includes('.baton/runtime/templates/adapters.json'));
     assert.ok(rels.includes('.baton/runtime/package.json'));
+    assert.ok(rels.includes('.baton/runtime/LICENSE'));
+    assert.match(files.find((f) => f.rel === '.baton/runtime/LICENSE').data.toString('utf8'), /^MIT License/);
+
     assert.ok(!rels.some((r) => /a\.test\.js|node_modules|\/tests\//.test(r)));
     assert.equal(JSON.parse(files.find((f) => f.rel.endsWith('package.json')).data).type, 'module');
   } finally { fs.rmSync(src, { recursive: true, force: true }); }
