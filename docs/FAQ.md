@@ -30,6 +30,8 @@ Yes: Windows, macOS and Linux, Node 18, 20 and 22 are tested in CI. Paths are no
 no command assumes `sh`. `init` writes `.baton/baton.cmd` next to the `sh` shim. Test output is decoded as UTF-8, so
 OEM-codepage output from `cmd` may look garbled.
 
+For the exact, CI-verified operating-system/Node and Windows shell combinations, see [compatibility](COMPATIBILITY.md). Git 2.30+ is the intended compatibility target but the minimum has not yet been tested with a pinned Git runner.
+
 ## Which agents are supported?
 
 Claude Code, Codex CLI, Gemini CLI, Antigravity, Cursor, GitHub Copilot, Windsurf, Cline, Aider and OpenCode have built-in
