@@ -22,7 +22,10 @@ export async function run(ctx, args) {
   const before = headCommit(root);
   // Rebase would rewrite a reviewed commit while leaving its event state ACCEPTED.
   // No legal verify/submit transition exists after ACCEPTED; block this misleading path.
+  const mainTip = git(root, ['rev-parse', `refs/heads/${main}`])?.stdout?.trim();
   const accepted = Object.values(state.packets).filter((s) => s.status === 'ACCEPTED' && s.commit &&
+    // Accepted commits already integrated into main are safe ancestors of new branches.
+    (!mainTip || git(root, ['merge-base', '--is-ancestor', s.commit, mainTip])?.status !== 0) &&
     git(root, ['merge-base', '--is-ancestor', s.commit, before])?.status === 0);
   if (accepted.length) throw new BatonError(`cannot rebase ${branch}: contains accepted packet(s) ${accepted.map((s) => s.id).join(', ')}; create and review a replacement packet from updated ${main}`, { code: 'ACCEPTED_REBASE' });
   const r = git(root, ['rebase', main]);
