@@ -25,6 +25,8 @@ This applies in all project spaces (issues, pull requests, discussions) and when
 
 ## Enforcement
 
+The maintainer's handling, confidentiality and review responsibilities are also described in the [governance policy](docs/GOVERNANCE.md). A reporter may request a second, independent review if the complaint involves the maintainer; do not post confidential allegations publicly.
+
 Maintainers may remove, edit or reject comments, commits, issues and other contributions that violate this code, and may
 temporarily or permanently ban contributors for behaviour they judge inappropriate. Report problems privately through
 GitHub's private reporting on the repository (see [SECURITY.md](SECURITY.md)) or to the maintainer,
