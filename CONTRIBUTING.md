@@ -86,6 +86,8 @@ To add an adapter, add its detection and file entries to `templates/adapters.jso
 
 ## Pull requests
 
+Follow the [governance and compatibility policy](docs/GOVERNANCE.md): reference a tracked issue, disclose CLI/config/ledger compatibility and rollback impact, and include real CI evidence. A review by a different Baton roster ID alone is not proof of an independent human review. Mark partial implementation with `Refs #N`, not `Closes #N`.
+
 1. Branch from `main`, keep the change focused, and add or update tests.
 2. Run `npm test` on your platform. CI runs Linux, Windows and macOS on Node 18, 20 and 22.
 3. Update [CHANGELOG.md](CHANGELOG.md) under `Unreleased`.
