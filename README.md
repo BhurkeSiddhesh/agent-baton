@@ -298,6 +298,7 @@ codex       0      0    0      0    0       0           -          1(9)
 
 ## Documentation
 
+- [Tested compatibility](docs/COMPATIBILITY.md) - verified Node/OS matrix and Windows shell smoke
 - [Quickstart](docs/QUICKSTART.md) - install, plan, run your first packet
 - [Engineering roadmap](docs/ROADMAP.md) - 88 scoped issues, priorities, prerequisites and release phases
 - [Concepts](docs/CONCEPTS.md) - agents, tracks, packets, gates, ledger, bus
