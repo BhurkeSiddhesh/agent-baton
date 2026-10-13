@@ -17,7 +17,9 @@ Only the latest released version receives security fixes while the project is be
 
 ## Threat model and design
 
-Agent Baton is a local, offline CLI that coordinates files in your repository.
+Agent Baton is a local, offline CLI that coordinates files in your repository. **It is not a sandbox or authenticated authorization mechanism.** Its checks mitigate accidental workflow violations, not malicious agents with the invoking user's shell or Git permissions.
+
+The canonical [multi-agent security model](docs/SECURITY_MODEL.md) documents the assets, actor trust boundaries, attack scenarios, **enforced versus advisory** controls, deployment mitigations and residual risks. Review it before granting coding agents filesystem, network, credential or GitHub write access.
 
 - **No network, no credentials.** The tool makes no network calls and never reads tokens. `baton dispatch` and
   `baton split --run` run your own `gh` and agent CLIs (both support `--dry-run`); their authentication is yours.
