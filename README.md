@@ -210,7 +210,9 @@ remote event mirror and verify it—one clone's local events are not automatical
 
 **If `main` moved after acceptance:** do **not** follow the old `sync → verify → submit` advice. An `ACCEPTED`
 packet cannot be begun, verified or resubmitted under the current state machine, and `sync` now rejects rewriting
-its accepted commit. The supported recovery is to create a **new replacement packet** from updated `main` with
+its accepted commit. **Unfinished `IN_PROGRESS` packets are different:** they may rebase onto a newer `main`,
+then freshly `verify` and `submit` for independent review; the original begin base must be in the integration
+history, not on an unrelated feature branch. The supported recovery is to create a **new replacement packet** from updated `main` with
 explicit ownership and a fresh `begin → verify → submit → independent accept → merge` cycle. Leave the old accepted
 packet as unmerged history; do not present it as integrated. `baton sync` is for unfinished branches, not accepted
 work. `submit` and a Baton verdict are **not a substitute** for GitHub branch protection or required PR approvals.
@@ -222,9 +224,13 @@ work. `submit` and a Baton verdict are **not a substitute** for GitHub branch pr
   assigned packet. `next` presents reviews, rework, assigned ready packets, stretch work and audits. The instructions
   tell the agent how to behave; a separate agent session must exist.
 - **GitHub / cloud:** initialize with `--cloud`, configure the provider's GitHub app, permissions and credentials;
-  create the required repository label once with `gh label create baton --color 0969da` (if it already exists, skip
-  this step). **Check the packet's assigned author** with `baton review WP-001` before dispatching. If it is assigned
-  to `codex`, use `baton dispatch WP-001 --to codex`, not `--to claude`: the target must match the assigned author.
+  create the required label in the **dispatch destination repository** with
+  `gh label create baton --repo owner/name --color 0969da` (use the destination's actual owner/name; skip if it
+  already exists). **Check the packet's assigned author** with `baton review WP-001` before dispatching. If it is assigned
+  to `codex`, use `baton dispatch WP-001 --to codex`, not `--to claude`: the target must match the assigned
+  author's **provider kind**, while the issue preserves the exact author ID. For custom IDs (e.g. `claude-a` of kind
+  `claude`), configure the receiving worker to use the matching `BATON_AGENT`; the generated `@claude` GitHub
+  workflow sets `BATON_AGENT=claude` by default and needs customization before it can run as `claude-a`.
   To use a different provider, arrange an authorized `baton handoff WP-001 --to claude --by human` first and make
   sure the reviewer is **not** Claude (use `baton reassign` if needed). `dispatch` creates a GitHub **issue**;
   it does not universally launch a remote worker. The generated
