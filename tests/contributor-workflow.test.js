@@ -19,6 +19,7 @@ test('issue forms collect reproducible work and direct sensitive reports private
   for (const field of ['id: objective', 'id: priority', 'id: phase', 'id: scope', 'id: acceptance', 'id: dependencies', 'id: risks']) {
     assert.ok(task.includes(field), 'Missing engineering task field: ' + field);
   }
+  assert.match(task, /description: ['"]Use navigable #123 references, or state None['"]/);
   const config = read('.github/ISSUE_TEMPLATE/config.yml');
   assert.match(config, /security\/advisories\/new/);
   assert.match(config, /blank_issues_enabled: false/);
