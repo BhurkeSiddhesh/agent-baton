@@ -1,0 +1,48 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please run `baton doctor --json` and `baton check --json` and remove anything private from the output.
+  - type: input
+    id: version
+    attributes:
+      label: Baton version
+      description: Output of `baton version`
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: OS and Node version
+      placeholder: "Windows 11, node v22.4.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: agents
+    attributes:
+      label: Agents involved
+      multiple: true
+      options: [Claude Code, Codex, Gemini CLI, Antigravity, Cursor, Copilot, Windsurf, Cline, Aider, OpenCode, Custom, None]
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The exact commands, in order, starting from a fresh `baton init` if possible.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: Error text, `baton doctor` output. No secrets.
+      render: text

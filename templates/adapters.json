@@ -1,0 +1,788 @@
+{
+  "version": 1,
+  "note": "src is relative to templates/, dest is repo-relative. mode: file = standalone generated file; block = managed block merged into a possibly pre-existing file (the installer adds the begin/end markers; templates contain none); merge-json = deep-merge JSON (arrays are appended without duplicates). each is always null: the template language cannot select a body per role or command, so per-role and per-command files are listed explicitly. onlyIfAbsent = write only when no file exists. when = install flag that enables the entry. postprocess = named step in postprocessors applied to the rendered text.",
+  "commands": [
+    "plan",
+    "next",
+    "review",
+    "status",
+    "audit",
+    "digest"
+  ],
+  "roles": [
+    "orchestrator",
+    "worker",
+    "reviewer",
+    "auditor"
+  ],
+  "shared": [
+    {
+      "src": "agents-block.md.tpl",
+      "dest": "AGENTS.md",
+      "each": null,
+      "mode": "block"
+    }
+  ],
+  "adapters": [
+    {
+      "id": "claude",
+      "label": "Claude Code",
+      "detect": {
+        "bins": [
+          "claude"
+        ],
+        "dirs": [
+          ".claude"
+        ],
+        "files": [
+          "CLAUDE.md"
+        ]
+      },
+      "instructionFiles": [
+        "CLAUDE.md"
+      ],
+      "files": [
+        {
+          "src": "adapters/claude/claude-md-block.md.tpl",
+          "dest": "CLAUDE.md",
+          "each": null,
+          "mode": "block"
+        },
+        {
+          "src": "adapters/claude/subagent-orchestrator.md.tpl",
+          "dest": ".claude/agents/baton-orchestrator.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/claude/subagent-worker.md.tpl",
+          "dest": ".claude/agents/baton-worker.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/claude/subagent-reviewer.md.tpl",
+          "dest": ".claude/agents/baton-reviewer.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/claude/subagent-auditor.md.tpl",
+          "dest": ".claude/agents/baton-auditor.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/claude/command-plan.md.tpl",
+          "dest": ".claude/commands/baton-plan.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/claude/command-next.md.tpl",
+          "dest": ".claude/commands/baton-next.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/claude/command-review.md.tpl",
+          "dest": ".claude/commands/baton-review.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/claude/command-status.md.tpl",
+          "dest": ".claude/commands/baton-status.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/claude/command-audit.md.tpl",
+          "dest": ".claude/commands/baton-audit.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/claude/command-digest.md.tpl",
+          "dest": ".claude/commands/baton-digest.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/claude/skill.md.tpl",
+          "dest": ".claude/skills/baton/SKILL.md",
+          "each": null,
+          "mode": "file"
+        }
+      ],
+      "notes": "CLAUDE.md imports AGENTS.md. The PreToolUse guard hook is merged by --hooks (see extras).",
+      "perRoleFiles": [
+        ".claude/agents/baton-orchestrator.md",
+        ".claude/agents/baton-worker.md",
+        ".claude/agents/baton-reviewer.md",
+        ".claude/agents/baton-auditor.md"
+      ],
+      "commandFiles": [
+        ".claude/commands/baton-plan.md",
+        ".claude/commands/baton-next.md",
+        ".claude/commands/baton-review.md",
+        ".claude/commands/baton-status.md",
+        ".claude/commands/baton-audit.md",
+        ".claude/commands/baton-digest.md"
+      ]
+    },
+    {
+      "id": "codex",
+      "label": "Codex CLI",
+      "detect": {
+        "bins": [
+          "codex"
+        ],
+        "dirs": [
+          ".codex"
+        ],
+        "files": []
+      },
+      "instructionFiles": [
+        "AGENTS.md"
+      ],
+      "files": [
+        {
+          "src": "adapters/codex/agent-orchestrator.toml.tpl",
+          "dest": ".codex/agents/baton-orchestrator.toml",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/codex/agent-worker.toml.tpl",
+          "dest": ".codex/agents/baton-worker.toml",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/codex/agent-reviewer.toml.tpl",
+          "dest": ".codex/agents/baton-reviewer.toml",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/codex/agent-auditor.toml.tpl",
+          "dest": ".codex/agents/baton-auditor.toml",
+          "each": null,
+          "mode": "file"
+        }
+      ],
+      "notes": "Reads AGENTS.md natively; the shared AGENTS.md block is written for every roster.",
+      "perRoleFiles": [
+        ".codex/agents/baton-orchestrator.toml",
+        ".codex/agents/baton-worker.toml",
+        ".codex/agents/baton-reviewer.toml",
+        ".codex/agents/baton-auditor.toml"
+      ],
+      "commandFiles": []
+    },
+    {
+      "id": "gemini",
+      "label": "Gemini CLI",
+      "detect": {
+        "bins": [
+          "gemini"
+        ],
+        "dirs": [
+          ".gemini"
+        ],
+        "files": [
+          "GEMINI.md"
+        ]
+      },
+      "instructionFiles": [
+        "GEMINI.md"
+      ],
+      "files": [
+        {
+          "src": "adapters/gemini/gemini-md-block.md.tpl",
+          "dest": "GEMINI.md",
+          "each": null,
+          "mode": "block"
+        },
+        {
+          "src": "adapters/gemini/command-plan.toml.tpl",
+          "dest": ".gemini/commands/baton/plan.toml",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/gemini/command-next.toml.tpl",
+          "dest": ".gemini/commands/baton/next.toml",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/gemini/command-review.toml.tpl",
+          "dest": ".gemini/commands/baton/review.toml",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/gemini/command-status.toml.tpl",
+          "dest": ".gemini/commands/baton/status.toml",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/gemini/command-audit.toml.tpl",
+          "dest": ".gemini/commands/baton/audit.toml",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/gemini/command-digest.toml.tpl",
+          "dest": ".gemini/commands/baton/digest.toml",
+          "each": null,
+          "mode": "file"
+        }
+      ],
+      "notes": "Commands are invoked as /baton:<cmd>. Gemini appends typed arguments to the prompt itself.",
+      "perRoleFiles": [],
+      "commandFiles": [
+        ".gemini/commands/baton/plan.toml",
+        ".gemini/commands/baton/next.toml",
+        ".gemini/commands/baton/review.toml",
+        ".gemini/commands/baton/status.toml",
+        ".gemini/commands/baton/audit.toml",
+        ".gemini/commands/baton/digest.toml"
+      ]
+    },
+    {
+      "id": "antigravity",
+      "label": "Antigravity",
+      "detect": {
+        "bins": [
+          "antigravity"
+        ],
+        "dirs": [
+          ".agent",
+          ".agents"
+        ],
+        "files": []
+      },
+      "instructionFiles": [
+        ".agent/rules/baton.md"
+      ],
+      "files": [
+        {
+          "src": "adapters/antigravity/rules.md.tpl",
+          "dest": ".agent/rules/baton.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/antigravity/workflow-plan.md.tpl",
+          "dest": ".agent/workflows/baton-plan.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/antigravity/workflow-next.md.tpl",
+          "dest": ".agent/workflows/baton-next.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/antigravity/workflow-review.md.tpl",
+          "dest": ".agent/workflows/baton-review.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/antigravity/workflow-status.md.tpl",
+          "dest": ".agent/workflows/baton-status.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/antigravity/workflow-audit.md.tpl",
+          "dest": ".agent/workflows/baton-audit.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/antigravity/workflow-digest.md.tpl",
+          "dest": ".agent/workflows/baton-digest.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/antigravity/skill-orchestrator.md.tpl",
+          "dest": ".agents/skills/baton-orchestrator/SKILL.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/antigravity/skill-worker.md.tpl",
+          "dest": ".agents/skills/baton-worker/SKILL.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/antigravity/skill-reviewer.md.tpl",
+          "dest": ".agents/skills/baton-reviewer/SKILL.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/antigravity/skill-auditor.md.tpl",
+          "dest": ".agents/skills/baton-auditor/SKILL.md",
+          "each": null,
+          "mode": "file"
+        }
+      ],
+      "notes": "Rules, workflows and skills in the workspace directories.",
+      "perRoleFiles": [
+        ".agents/skills/baton-orchestrator/SKILL.md",
+        ".agents/skills/baton-worker/SKILL.md",
+        ".agents/skills/baton-reviewer/SKILL.md",
+        ".agents/skills/baton-auditor/SKILL.md"
+      ],
+      "commandFiles": [
+        ".agent/workflows/baton-plan.md",
+        ".agent/workflows/baton-next.md",
+        ".agent/workflows/baton-review.md",
+        ".agent/workflows/baton-status.md",
+        ".agent/workflows/baton-audit.md",
+        ".agent/workflows/baton-digest.md"
+      ]
+    },
+    {
+      "id": "cursor",
+      "label": "Cursor",
+      "detect": {
+        "bins": [
+          "cursor-agent",
+          "cursor"
+        ],
+        "dirs": [
+          ".cursor"
+        ],
+        "files": [
+          ".cursorrules"
+        ]
+      },
+      "instructionFiles": [
+        ".cursor/rules/baton.mdc"
+      ],
+      "files": [
+        {
+          "src": "adapters/cursor/rule.mdc.tpl",
+          "dest": ".cursor/rules/baton.mdc",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/cursor/command-plan.md.tpl",
+          "dest": ".cursor/commands/baton-plan.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/cursor/command-next.md.tpl",
+          "dest": ".cursor/commands/baton-next.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/cursor/command-review.md.tpl",
+          "dest": ".cursor/commands/baton-review.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/cursor/command-status.md.tpl",
+          "dest": ".cursor/commands/baton-status.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/cursor/command-audit.md.tpl",
+          "dest": ".cursor/commands/baton-audit.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/cursor/command-digest.md.tpl",
+          "dest": ".cursor/commands/baton-digest.md",
+          "each": null,
+          "mode": "file"
+        }
+      ],
+      "notes": "Always-applied rule plus slash commands.",
+      "perRoleFiles": [],
+      "commandFiles": [
+        ".cursor/commands/baton-plan.md",
+        ".cursor/commands/baton-next.md",
+        ".cursor/commands/baton-review.md",
+        ".cursor/commands/baton-status.md",
+        ".cursor/commands/baton-audit.md",
+        ".cursor/commands/baton-digest.md"
+      ]
+    },
+    {
+      "id": "copilot",
+      "label": "GitHub Copilot",
+      "detect": {
+        "bins": [
+          "copilot"
+        ],
+        "dirs": [
+          ".github/agents",
+          ".github/prompts"
+        ],
+        "files": [
+          ".github/copilot-instructions.md"
+        ]
+      },
+      "instructionFiles": [
+        ".github/copilot-instructions.md"
+      ],
+      "files": [
+        {
+          "src": "adapters/copilot/instructions-block.md.tpl",
+          "dest": ".github/copilot-instructions.md",
+          "each": null,
+          "mode": "block"
+        },
+        {
+          "src": "adapters/copilot/agent-orchestrator.agent.md.tpl",
+          "dest": ".github/agents/baton-orchestrator.agent.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/copilot/agent-worker.agent.md.tpl",
+          "dest": ".github/agents/baton-worker.agent.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/copilot/agent-reviewer.agent.md.tpl",
+          "dest": ".github/agents/baton-reviewer.agent.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/copilot/agent-auditor.agent.md.tpl",
+          "dest": ".github/agents/baton-auditor.agent.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/copilot/prompt-plan.prompt.md.tpl",
+          "dest": ".github/prompts/baton-plan.prompt.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/copilot/prompt-next.prompt.md.tpl",
+          "dest": ".github/prompts/baton-next.prompt.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/copilot/prompt-review.prompt.md.tpl",
+          "dest": ".github/prompts/baton-review.prompt.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/copilot/prompt-status.prompt.md.tpl",
+          "dest": ".github/prompts/baton-status.prompt.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/copilot/prompt-audit.prompt.md.tpl",
+          "dest": ".github/prompts/baton-audit.prompt.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/copilot/prompt-digest.prompt.md.tpl",
+          "dest": ".github/prompts/baton-digest.prompt.md",
+          "each": null,
+          "mode": "file"
+        }
+      ],
+      "notes": "Custom agents and prompt files; also the target of the cloud coding agent via baton dispatch.",
+      "perRoleFiles": [
+        ".github/agents/baton-orchestrator.agent.md",
+        ".github/agents/baton-worker.agent.md",
+        ".github/agents/baton-reviewer.agent.md",
+        ".github/agents/baton-auditor.agent.md"
+      ],
+      "commandFiles": [
+        ".github/prompts/baton-plan.prompt.md",
+        ".github/prompts/baton-next.prompt.md",
+        ".github/prompts/baton-review.prompt.md",
+        ".github/prompts/baton-status.prompt.md",
+        ".github/prompts/baton-audit.prompt.md",
+        ".github/prompts/baton-digest.prompt.md"
+      ]
+    },
+    {
+      "id": "windsurf",
+      "label": "Windsurf",
+      "detect": {
+        "bins": [
+          "windsurf"
+        ],
+        "dirs": [
+          ".windsurf"
+        ],
+        "files": [
+          ".windsurfrules"
+        ]
+      },
+      "instructionFiles": [
+        ".windsurf/rules/baton.md"
+      ],
+      "files": [
+        {
+          "src": "adapters/windsurf/rule.md.tpl",
+          "dest": ".windsurf/rules/baton.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/windsurf/workflow-plan.md.tpl",
+          "dest": ".windsurf/workflows/baton-plan.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/windsurf/workflow-next.md.tpl",
+          "dest": ".windsurf/workflows/baton-next.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/windsurf/workflow-review.md.tpl",
+          "dest": ".windsurf/workflows/baton-review.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/windsurf/workflow-status.md.tpl",
+          "dest": ".windsurf/workflows/baton-status.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/windsurf/workflow-audit.md.tpl",
+          "dest": ".windsurf/workflows/baton-audit.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/windsurf/workflow-digest.md.tpl",
+          "dest": ".windsurf/workflows/baton-digest.md",
+          "each": null,
+          "mode": "file"
+        }
+      ],
+      "notes": "Always-on rule plus workflows.",
+      "perRoleFiles": [],
+      "commandFiles": [
+        ".windsurf/workflows/baton-plan.md",
+        ".windsurf/workflows/baton-next.md",
+        ".windsurf/workflows/baton-review.md",
+        ".windsurf/workflows/baton-status.md",
+        ".windsurf/workflows/baton-audit.md",
+        ".windsurf/workflows/baton-digest.md"
+      ]
+    },
+    {
+      "id": "cline",
+      "label": "Cline",
+      "detect": {
+        "bins": [],
+        "dirs": [
+          ".clinerules"
+        ],
+        "files": []
+      },
+      "instructionFiles": [
+        ".clinerules/baton.md"
+      ],
+      "files": [
+        {
+          "src": "adapters/cline/rules.md.tpl",
+          "dest": ".clinerules/baton.md",
+          "each": null,
+          "mode": "file"
+        }
+      ],
+      "notes": "If .clinerules exists as a file instead of a directory the installer must skip this adapter and warn.",
+      "perRoleFiles": [],
+      "commandFiles": []
+    },
+    {
+      "id": "aider",
+      "label": "Aider",
+      "detect": {
+        "bins": [
+          "aider"
+        ],
+        "dirs": [],
+        "files": [
+          ".aider.conf.yml",
+          "CONVENTIONS.md"
+        ]
+      },
+      "instructionFiles": [
+        "CONVENTIONS.md"
+      ],
+      "files": [
+        {
+          "src": "adapters/aider/conventions-block.md.tpl",
+          "dest": "CONVENTIONS.md",
+          "each": null,
+          "mode": "block"
+        },
+        {
+          "src": "adapters/aider/aider.conf.yml.tpl",
+          "dest": ".aider.conf.yml",
+          "each": null,
+          "mode": "file",
+          "onlyIfAbsent": true
+        }
+      ],
+      "notes": ".aider.conf.yml is written only when absent; an existing one is never touched.",
+      "perRoleFiles": [],
+      "commandFiles": []
+    },
+    {
+      "id": "opencode",
+      "label": "OpenCode",
+      "detect": {
+        "bins": [
+          "opencode"
+        ],
+        "dirs": [
+          ".opencode"
+        ],
+        "files": [
+          "opencode.json"
+        ]
+      },
+      "instructionFiles": [
+        "AGENTS.md"
+      ],
+      "files": [
+        {
+          "src": "adapters/opencode/agent-orchestrator.md.tpl",
+          "dest": ".opencode/agent/baton-orchestrator.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/opencode/agent-worker.md.tpl",
+          "dest": ".opencode/agent/baton-worker.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/opencode/agent-reviewer.md.tpl",
+          "dest": ".opencode/agent/baton-reviewer.md",
+          "each": null,
+          "mode": "file"
+        },
+        {
+          "src": "adapters/opencode/agent-auditor.md.tpl",
+          "dest": ".opencode/agent/baton-auditor.md",
+          "each": null,
+          "mode": "file"
+        }
+      ],
+      "notes": "Reads AGENTS.md natively; the shared AGENTS.md block is written for every roster.",
+      "perRoleFiles": [
+        ".opencode/agent/baton-orchestrator.md",
+        ".opencode/agent/baton-worker.md",
+        ".opencode/agent/baton-reviewer.md",
+        ".opencode/agent/baton-auditor.md"
+      ],
+      "commandFiles": []
+    },
+    {
+      "id": "custom",
+      "label": "Custom agent",
+      "detect": {
+        "bins": [],
+        "dirs": [],
+        "files": [
+          ".baton/agents.json"
+        ]
+      },
+      "instructionFiles": [],
+      "files": [],
+      "notes": "Declared in .baton/agents.json as {id,label,instructionFile,templateDir}. The installer renders the declared templateDir with the same variables.",
+      "perRoleFiles": [],
+      "commandFiles": []
+    }
+  ],
+  "extras": [
+    {
+      "src": "hooks/claude-settings.json",
+      "dest": ".claude/settings.json",
+      "each": null,
+      "mode": "merge-json",
+      "when": "hooks"
+    },
+    {
+      "src": "github/baton-ci.yml.tpl",
+      "dest": ".github/workflows/baton-ci.yml",
+      "each": null,
+      "mode": "file",
+      "when": "cloud",
+      "postprocess": "github-expressions"
+    },
+    {
+      "src": "github/baton-claude.yml.tpl",
+      "dest": ".github/workflows/baton-claude.yml",
+      "each": null,
+      "mode": "file",
+      "when": "cloud",
+      "postprocess": "github-expressions"
+    },
+    {
+      "src": "github/baton-dispatch.yml.tpl",
+      "dest": ".github/workflows/baton-dispatch.yml",
+      "each": null,
+      "mode": "file",
+      "when": "cloud",
+      "postprocess": "github-expressions"
+    },
+    {
+      "src": "github/PULL_REQUEST_TEMPLATE.md.tpl",
+      "dest": ".github/PULL_REQUEST_TEMPLATE.md",
+      "each": null,
+      "mode": "file",
+      "when": "cloud",
+      "onlyIfAbsent": true
+    },
+    {
+      "src": "docs/ORCHESTRATION.md.tpl",
+      "dest": "docs/BATON.md",
+      "each": null,
+      "mode": "file",
+      "when": "docs"
+    }
+  ],
+  "postprocessors": {
+    "github-expressions": {
+      "description": "After rendering, replace every $[[ expr ]] with ${{ expr }}. The template engine reserves double braces, so GitHub expressions are written with square brackets.",
+      "pattern": "\\$\\[\\[([\\s\\S]*?)\\]\\]",
+      "replacement": "${{$1}}"
+    }
+  },
+  "planStarter": "plan.starter.json"
+}

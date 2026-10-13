@@ -1,0 +1,22 @@
+{
+  "name": "agent-baton",
+  "version": "0.1.0",
+  "description": "Portable multi-agent orchestration for any repository: split work across AI coding agents, enforce file ownership, track claims, reviews and findings in a mergeable ledger.",
+  "type": "module",
+  "bin": {
+    "baton": "bin/baton.js",
+    "agent-baton": "bin/baton.js"
+  },
+  "files": ["bin", "src", "templates", "assets", "docs", "README.md", "LICENSE", "CHANGELOG.md"],
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "test": "node --test",
+    "baton": "node bin/baton.js"
+  },
+  "keywords": ["ai", "agents", "orchestration", "multi-agent", "claude-code", "codex", "gemini", "cursor", "copilot", "antigravity", "workflow", "agents-md"],
+  "author": "Siddhesh Bhurke",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/BhurkeSiddhesh/agent-baton.git" },
+  "homepage": "https://github.com/BhurkeSiddhesh/agent-baton#readme",
+  "bugs": { "url": "https://github.com/BhurkeSiddhesh/agent-baton/issues" }
+}

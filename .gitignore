@@ -1,0 +1,5 @@
+node_modules/
+.baton/state/
+.baton/views/
+*.log
+.DS_Store

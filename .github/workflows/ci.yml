@@ -1,0 +1,85 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Git identity for tests that commit
+        shell: bash
+        run: |
+          git config --global user.email "ci@example.invalid"
+          git config --global user.name "ci"
+          git config --global init.defaultBranch main
+      - run: npm test
+
+  smoke:
+    name: smoke init and doctor (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Init and doctor in a temporary repository
+        shell: bash
+        run: |
+          set -eu
+          git config --global user.email "ci@example.invalid"
+          git config --global user.name "ci"
+          git config --global init.defaultBranch main
+          BATON="$GITHUB_WORKSPACE/bin/baton.js"
+          TMP="$(mktemp -d)"
+          cd "$TMP"
+          git init -q
+          printf '{"name":"smoke","scripts":{"test":"node -e 0"}}\n' > package.json
+          git add -A
+          git commit -q -m "initial"
+          node "$BATON" init --yes --agents claude,codex,gemini --cloud --hooks
+          node "$BATON" init --yes --agents claude,codex,gemini --cloud --hooks
+          node .baton/runtime/bin/baton.js doctor
+          node .baton/runtime/bin/baton.js check
+          node .baton/runtime/bin/baton.js status --json
+          node .baton/runtime/bin/baton.js uninstall --yes --dry-run
+
+  docs:
+    name: docs links and generated commands
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Relative links and anchors resolve
+        run: node .github/scripts/check-links.mjs
+      - name: docs/COMMANDS.md is up to date
+        run: |
+          node .github/scripts/gen-commands.mjs
+          git diff --exit-code docs/COMMANDS.md

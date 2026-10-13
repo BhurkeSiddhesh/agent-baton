@@ -1,0 +1,23 @@
+name: Agent support request
+description: Ask for a new agent adapter or report a wrong adapter file
+labels: [adapter]
+body:
+  - type: input
+    id: agent
+    attributes:
+      label: Agent or tool
+      placeholder: "Name and a link to its documentation"
+    validations:
+      required: true
+  - type: textarea
+    id: surface
+    attributes:
+      label: Instruction surface
+      description: Where does it read project instructions, custom agents, commands or rules from (paths and formats)?
+    validations:
+      required: true
+  - type: textarea
+    id: detect
+    attributes:
+      label: How to detect it
+      description: CLI binary name, config directories or files.

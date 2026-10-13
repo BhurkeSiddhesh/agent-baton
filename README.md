@@ -1,0 +1,153 @@
+<div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+  <img alt="Agent Baton" src="assets/logo-light.svg" height="56">
+</picture>
+
+<br><br>
+
+<img alt="Agent Baton: one plan, many agents, one ledger" src="assets/banner.svg" width="860">
+
+<br>
+
+[![CI](https://github.com/BhurkeSiddhesh/agent-baton/actions/workflows/ci.yml/badge.svg)](https://github.com/BhurkeSiddhesh/agent-baton/actions/workflows/ci.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-orange.svg)](LICENSE)
+[![node >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](package.json)
+[![runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-blue.svg)](package.json)
+
+</div>
+
+**Agent Baton** installs a multi-agent workflow into any repository with one command. A goal is split into
+**packets** that each own an exact list of files. Agents claim a packet, work inside its scope, pass a verify gate
+(scope guard, secret scan, tests), and hand it to a *different* agent for review. Every step is an event in an
+append-only, hash-checked ledger of one JSON file per event, so it merges cleanly under git and is shared by local and
+cloud agents. Claude Code, Codex, Gemini CLI, Antigravity, Cursor, Copilot, Windsurf, Cline, Aider and OpenCode all
+get thin adapter files that point at the same protocol. Zero runtime dependencies, Node 18 or newer, Windows, macOS
+and Linux.
+
+## 60-second quickstart
+
+```bash
+cd your-repo
+npx github:BhurkeSiddhesh/agent-baton init       # works today, straight from GitHub
+# npx agent-baton init                           # same thing once the package is on npm
+```
+
+`init` detects your stack, test command and installed agent CLIs, writes `.baton/`, a managed block in `AGENTS.md` and
+the adapter files for each agent, and vendors the runtime into `.baton/runtime/` so everything afterwards runs with
+no network and no install:
+
+```bash
+node .baton/runtime/bin/baton.js split "Ship invoice export" --out .baton/prompt.md   # or: plan add ...
+node .baton/runtime/bin/baton.js check                                          # validate
+node .baton/runtime/bin/baton.js next --agent claude                            # what to do now
+```
+
+Add `--yes` to skip prompts, `--dry-run` to preview every file, `--cloud` for GitHub workflows, `--hooks` for the
+Claude Code ownership guard. Shortcut: `.baton/baton` (sh) and `.baton/baton.cmd` (Windows) wrap the same command, and
+`npm run baton -- <command>` works in Node projects. The full walkthrough is in [docs/QUICKSTART.md](docs/QUICKSTART.md).
+
+Prefer a bootstrap script? [install.sh](install.sh) and [install.ps1](install.ps1) check for Node 18+ and run the
+same `npx` command.
+
+## What you get
+
+| Piece | What it does |
+|---|---|
+| **Plan** (`.baton/plan.json`) | Tracks, packets with exact `owns` lists, dependencies, gates, milestones. [Format](docs/PLAN_FORMAT.md). |
+| **Packets and leases** | `begin` claims a packet with a lease; `heartbeat` extends it; a stale lease can be reclaimed. |
+| **Ownership** | Two packets that can run together may not own the same file. `verify` flags anything outside scope. |
+| **Verify gate** | Scope guard, protected paths, secret scan (files and branch history), your test command. `submit` needs a current pass. |
+| **Independent review** | The reviewer is never the author. `accept`, `fix` or `reject`; open BLOCKER or MAJOR findings block acceptance. |
+| **Audit mode** | When your queue is empty, `next` lists audit targets. Auditors file findings; they never edit audited files. |
+| **Ledger** | One JSON file per event in `.baton/ledger/`, with a SHA-256 per event. Live state is derived by replay. |
+| **Scoreboard** | `scores`, `release`, `digest` and `render` are pure views of the ledger. |
+| **Adapters** | Native files for each agent: rules, subagents, slash commands, skills, workflows. [Per agent](docs/AGENTS.md). |
+| **Cloud support** | `dispatch` turns a packet into a GitHub issue; optional workflows for CI, `@claude` and issue handoff. [Cloud](docs/CLOUD.md). |
+| **Guard hook** | Optional pre-edit hook that denies edits outside the agent's packet. |
+| **Safe install** | Never overwrites your files. Managed blocks, a manifest of hashes, `.baton-new` sidecars, `uninstall`. |
+
+## Supported agents
+
+| Agent | Adapter id | Instruction surface | Generated files |
+|---|---|---|---|
+| Claude Code | `claude` | `CLAUDE.md` block, subagents, slash commands, skill | 11 files plus the `CLAUDE.md` block |
+| Codex CLI | `codex` | `AGENTS.md`, custom agents | 4 TOML files |
+| Gemini CLI | `gemini` | `GEMINI.md` block, custom commands | 6 TOML files plus the block |
+| Antigravity | `antigravity` | rules, workflows, skills | 11 files |
+| Cursor | `cursor` | rule `.mdc`, commands | 7 files |
+| GitHub Copilot | `copilot` | `copilot-instructions.md` block, agents, prompts | 10 files plus the block |
+| Windsurf | `windsurf` | rules, workflows | 7 files |
+| Cline | `cline` | `.clinerules/baton.md` | 1 file |
+| Aider | `aider` | `CONVENTIONS.md` block, `.aider.conf.yml` if absent | 1 file plus the block |
+| OpenCode | `opencode` | `AGENTS.md`, agents | 4 files |
+| Anything else | `custom` | declared in `.baton/agents.json` | your template |
+
+Details, detection rules and exact paths: [docs/AGENTS.md](docs/AGENTS.md).
+
+## How it flows
+
+<div align="center">
+<img alt="Agent Baton workflow: plan, assign, begin, build, verify, submit, review, merge" src="assets/diagram-workflow.svg" width="100%">
+</div>
+
+Plan, assign, begin, build, verify, submit, review, accept or reject, then merge. Every arrow is a ledger event.
+[docs/WORKFLOW.md](docs/WORKFLOW.md) has the full lifecycle, review rules, audit mode, escalation and handoff.
+
+## Example session
+
+Two agents (`claude` orchestrates, `codex` reviews). Output is trimmed.
+
+```console
+$ baton plan add --title "Docs" --owns docs/ --by human
+added WP-001  Docs
+$ baton assign --by human
+WP-001   agent - -> claude              reviewer - -> codex               (lowest load; review load 0)
+$ git checkout -b baton/WP-001-docs
+$ baton begin WP-001 --agent claude
+claude started WP-001
+  lease until 2026-10-13T13:52:28Z
+  owns: docs/
+$ echo hi > docs/a.md; echo no > other.txt
+$ baton verify WP-001
+Verify WP-001: FAIL (scope mode: git-branch)
+- OUT OF SCOPE or PROTECTED (revert, or post a REQUEST on the bus): other.txt
+$ rm other.txt; git add -A; git commit -m docs
+$ baton verify WP-001
+Verify WP-001: PASS (scope mode: git-branch)
+$ baton submit WP-001 --agent claude --note done
+WP-001 is READY_FOR_REVIEW (commit 3c2e78e...). A sign-off and a release were posted.
+$ baton accept WP-001 --by codex --score 9
+WP-001 -> ACCEPTED by codex
+$ baton scores
+AGENT   START  READY  ACC  FIXES  REJ  REWORK  FIRST-PASS  REVIEWS(AVG)  ...
+claude      1      1    1      0    0       0        100%             0
+codex       0      0    0      0    0       0           -          1(9)
+```
+
+(`baton` stands for `node .baton/runtime/bin/baton.js`, or `npx agent-baton` outside an installed repo.)
+
+## Documentation
+
+- [Quickstart](docs/QUICKSTART.md) - install, plan, run your first packet
+- [Concepts](docs/CONCEPTS.md) - agents, tracks, packets, gates, ledger, bus
+- [Workflow](docs/WORKFLOW.md) - the full lifecycle and the review rules
+- [Commands](docs/COMMANDS.md) - every command and flag, from the real `--help`
+- [Agents](docs/AGENTS.md) - per-agent setup, files written, custom agents
+- [Cloud agents](docs/CLOUD.md) - ledger mirror, branches, dispatch, GitHub workflows
+- [Plan format](docs/PLAN_FORMAT.md) - `plan.json` and `config.json` reference
+- [FAQ](docs/FAQ.md) and [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Changelog](CHANGELOG.md), [Contributing](CONTRIBUTING.md), [Security](SECURITY.md), [Code of Conduct](CODE_OF_CONDUCT.md)
+- Internals for contributors: [docs/internals/SPEC.md](docs/internals/SPEC.md), [LIB_API](docs/internals/LIB_API.md), [BRAND](docs/internals/BRAND.md)
+
+## Design rules
+
+- No network access and no secrets in the tool itself. `dispatch` and `split --run` only shell out to your own `gh` and agent CLIs, and both support `--dry-run`.
+- Nothing is applied behind your back: `split` saves a proposal, you run `plan import`.
+- Humans stay in charge: gates open only by their owner or `human`, and the orchestrator cannot override them.
+- Every query command takes `--json` and prints exactly one JSON document. Exit codes: 0 ok, 1 rule violation, 2 usage error, 3 internal error.
+
+## License
+
+[MIT](LICENSE). Copyright (c) 2026 Siddhesh Bhurke.
