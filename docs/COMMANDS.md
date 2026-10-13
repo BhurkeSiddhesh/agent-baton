@@ -772,7 +772,7 @@ baton merge <packet> --by <orchestrator> [--json]
 
 Fast-forward main to an ACCEPTED packet commit (never creates merge commits)
 
-Only ACCEPTED packets recorded from the integration tip; main must fast-forward to the exact reviewed commit. If main moved, create and review a replacement packet from updated main (accepted packets cannot simply be resubmitted). Publish ledger events on main after merge.
+Only ACCEPTED packets whose begin base is in integration history; main must fast-forward to the exact reviewed commit. Unfinished packets may sync and reverify after main advances; accepted packets need a replacement if main advances. Publish ledger events on main after merge.
 
 Options:
       --by <v>     the orchestrator (or BATON_AGENT)
