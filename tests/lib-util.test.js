@@ -97,7 +97,10 @@ test('git helpers in a repo and outside one', () => {
     assert.equal(headCommit(plain.root), null);
     assert.equal(gitOut(plain.root, ['rev-parse', 'HEAD']), null);
     assert.equal(path.resolve(commonDir(repo.root)), path.join(repo.root, '.git'));
-    assert.equal(repoRoot(repo.root).toLowerCase(), toPosix(repo.root).toLowerCase());
+    // Git can return a Windows 8.3 short path while mkdtemp reports the long path.
+    // Compare the real filesystem paths rather than their differing spellings.
+    assert.equal(toPosix(fs.realpathSync.native(repoRoot(repo.root))).toLowerCase(),
+      toPosix(fs.realpathSync.native(repo.root)).toLowerCase());
     assert.equal(isDirty(repo.root), false);
     const base = headCommit(repo.root);
     repo.write('a.txt', 'two');
