@@ -216,48 +216,53 @@ Options:
 ### baton plan
 
 ```text
-baton plan <show|validate|add|edit|rm|import|graph> [id|file] [options]
+baton plan <show|validate|track add|add|edit|rm|import|graph> [id|file] [options]
 
 Show, validate, edit, import or graph the plan
 
 show [id]                  print the plan (or one packet in full)
 validate                   check the plan against the roster and ownership rules (exit 1 on errors)
+track add --id T --owner A --owns a/,b/   create a track (packets name it with --track)
 add --title T --owns a,b   add a packet (id assigned unless --id)
 edit <id> [flags]          change only the flags given; "none" clears track/agent/reviewer/milestone/gate/test/deps/owns lists
 rm <id> [--force]          remove a packet that never started (--force also drops dependencies on it)
-import <file|-> [--merge|--replace] [--dry-run]   apply a plan or a proposal {"packets":[...]}
+import <file|-> [--merge|--replace] [--dry-run] [--allow-test-commands]   apply a plan or a proposal {"packets":[...]}; per-packet "test" shell commands are dropped unless allowed
 graph [--mermaid]          dependency graph as ASCII or Mermaid
 Plan writes are for the orchestrator or human: set --by, or BATON_AGENT, to your id.
 
 Options:
-      --json               machine-readable output
-      --by <v>             acting agent (orchestrator or human)
-      --id <v>             add: explicit packet id
-      --title <v>          
-      --track <v>          
-      --agent <v>          author of the packet
-      --reviewer <v>       
-      --owns <v>...        owned paths, comma separated or repeated
-      --reads <v>...       
-      --deps <v>...        
-      --needs-done <v>...  packets that must be ACCEPTED before this one starts
-      --priority <v>       P0|P1|P2|P3
-      --milestone <v>      
-      --description <v>    
-      --check <v>...       done check (repeatable; on edit replaces the list)
-      --stretch            
-      --no-stretch         edit: make the packet non-stretch
-      --gate <v>           
-      --gate-mode <v>      start|live_only
-      --test <v>           per-packet test command
-      --force              
-      --merge              import: add to the existing plan (default)
-      --replace            import: replace packets (and any lists the file provides)
-      --dry-run            
-      --mermaid            
-  -h, --help               show this help
+      --json                 machine-readable output
+      --by <v>               acting agent (orchestrator or human)
+      --id <v>               add: explicit packet id
+      --title <v>            packet title
+      --track <v>            track id (see "plan track add")
+      --agent <v>            author of the packet
+      --reviewer <v>         reviewing agent (must differ from the author)
+      --owns <v>...          owned paths, comma separated or repeated
+      --owner <v>            track add: owning agent
+      --theme <v>            track add: short theme
+      --reads <v>...         paths the packet reads but does not own
+      --deps <v>...          packets that should finish first
+      --needs-done <v>...    packets that must be ACCEPTED before this one starts
+      --priority <v>         P0|P1|P2|P3
+      --milestone <v>        milestone id
+      --description <v>      longer description of the packet
+      --check <v>...         done check (repeatable; on edit replaces the list)
+      --stretch              mark the packet as stretch work
+      --no-stretch           edit: make the packet non-stretch
+      --gate <v>             gate id that blocks this packet
+      --gate-mode <v>        start|live_only
+      --test <v>             per-packet test command (a shell command that "baton verify" runs)
+      --force                rm: also drop dependencies on the removed packet
+      --merge                import: add to the existing plan (default)
+      --replace              import: replace packets (and any lists the file provides)
+      --allow-test-commands  import: keep per-packet "test" shell commands from the file (dropped by default)
+      --dry-run              import: show the outcome without writing
+      --mermaid              graph: print Mermaid instead of ASCII
+  -h, --help                 show this help
 
 Examples:
+  baton plan track add --id api --owner codex --owns src/api/
   baton plan add --title "CSV exporter" --track api --owns src/api/export.js --priority P0 --check "tests green"
   baton plan edit WP-003 --reviewer gemini --deps WP-001
   baton plan import .baton/proposals/20261013T101500Z.json --dry-run
@@ -320,7 +325,7 @@ Gates are human decisions that block packets until opened. Only the gate owner o
 
 Options:
       --by <v>    who opens or closes the gate (the owner, or human)
-      --note <v>  
+      --note <v>  reason recorded with the decision
       --json      
   -h, --help      show this help
 
