@@ -308,6 +308,7 @@ codex       0      0    0      0    0       0           -          1(9)
 - [Plan format](docs/PLAN_FORMAT.md) - `plan.json` and `config.json` reference
 - [FAQ](docs/FAQ.md) and [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Security model](docs/SECURITY_MODEL.md) - trust boundaries, enforcement limits, threat scenarios and safer operation
+- [Governance and compatibility](docs/GOVERNANCE.md) - review responsibility, schema stability and migration process
 - [Changelog](CHANGELOG.md), [Contributing](CONTRIBUTING.md), [Security](SECURITY.md), [Code of Conduct](CODE_OF_CONDUCT.md)
 - Internals for contributors: [docs/internals/SPEC.md](docs/internals/SPEC.md), [LIB_API](docs/internals/LIB_API.md), [BRAND](docs/internals/BRAND.md)
 
