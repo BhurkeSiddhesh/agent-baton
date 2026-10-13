@@ -70,6 +70,8 @@ test('parseArgs errors are UsageErrors with hints', () => {
 
 function fakeCommands(dir, files) {
   fs.mkdirSync(dir, { recursive: true });
+  // Temporary .js command fixtures must be ESM even outside this package's root.
+  fs.writeFileSync(path.join(dir, 'package.json'), '{"type":"module"}\n');
   for (const [name, src] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), src);
 }
 
