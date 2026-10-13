@@ -275,5 +275,6 @@ If an orchestrator publishes new assignments on `main`, each idle worker must up
 Accepted packets cannot be reverified after `sync`. If main moved, create and independently verify a new
 replacement packet based on its current tip. The original accepted packet remains historical and **unmerged**.
 
-For cloud dispatch, create the GitHub `baton` label once with `gh label create baton`; ensure `--to` matches
-its assigned worker before dispatch. Author changes require `baton handoff` and an independent reviewer.
+For cloud dispatch, create the destination repository's `baton` label with
+`gh label create baton --repo owner/name --color 0969da` (substitute the destination repository). Ensure
+`--to` matches the assigned worker's provider kind and its runner uses the **exact** roster ID before dispatch. Author changes require `baton handoff` and an independent reviewer.
