@@ -7,6 +7,13 @@ export const RUNTIME_DIR = '.baton/runtime';
 export const RUNTIME_ENTRY = '.baton/runtime/bin/baton.js';
 export const RUNTIME_COMMAND = 'node .baton/runtime/bin/baton.js';
 
+/** Fail explicitly on an incomplete distribution rather than vendoring MIT code without its notice. */
+export function readLicense(srcRoot = packageRoot()) {
+  const file = path.join(srcRoot, 'LICENSE');
+  if (!fs.existsSync(file)) throw new Error(`missing required Baton license notice: ${file}`);
+  return fs.readFileSync(file);
+}
+
 const SKIP_DIRS = ['node_modules', '.git', 'tests', 'test', '__pycache__', '.baton'];
 
 function copyTree(srcDir, destPrefix, out) {
@@ -43,7 +50,7 @@ export function collectRuntime({ srcRoot = packageRoot(), templates = path.join(
   // The vendored runtime redistributes substantial MIT-licensed source code.
   // Keep the upstream permission and warranty notice with each installed copy.
   const license = path.join(srcRoot, 'LICENSE');
-  if (fs.existsSync(license)) out.push({ rel: `${RUNTIME_DIR}/LICENSE`, data: fs.readFileSync(license) });
+  out.push({ rel: `${RUNTIME_DIR}/LICENSE`, data: readLicense(srcRoot) });
   out.push({ rel: `${RUNTIME_DIR}/package.json`, data: runtimePackageJson() });
   return out.sort((a, b) => (a.rel < b.rel ? -1 : 1));
 }
