@@ -306,7 +306,7 @@ test('merge accepts a freshly reverified unfinished packet rebased onto newer in
   r.write('src/api/export.js', 'export const x = 1;\n');
   r.commitAll('implement WP-001');
   r.git('checkout', '-q', 'main');
-  r.write('.baton/ledger/coordination-note.json', '{"note":"main advanced"}\n');
+  r.write('.baton/state/coordination-note.txt', 'main advanced\n');
   r.commitAll('integration coordination update');
   r.git('checkout', '-q', 'track/api');
   assert.equal((await cli(r.root, ['sync'])).status, 0);
