@@ -328,6 +328,7 @@ codex       0      0    0      0    0       0           -          1(9)
 - [FAQ](docs/FAQ.md) and [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Security model](docs/SECURITY_MODEL.md) - trust boundaries, enforcement limits, threat scenarios and safer operation
 - [Licensing and redistribution](docs/LICENSING.md) - vendored MIT notice, third-party review and release checklist
+- [Governance and compatibility](docs/GOVERNANCE.md) - review responsibility, schema stability and migration process
 - [Changelog](CHANGELOG.md), [Contributing](CONTRIBUTING.md), [Security](SECURITY.md), [Code of Conduct](CODE_OF_CONDUCT.md)
 - Internals for contributors: [docs/internals/SPEC.md](docs/internals/SPEC.md), [LIB_API](docs/internals/LIB_API.md), [BRAND](docs/internals/BRAND.md)
 

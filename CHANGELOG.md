@@ -6,6 +6,11 @@ All notable changes to Agent Baton are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Documented maintainer and contributor responsibilities, pre-1.0 compatibility, deprecation, migration and release approval expectations; clarified external platform escalation for maintainer-related conduct reports.
+- Included governance-linked policy files in the npm distribution so local documentation links work.
+
 ### Fixed
 
 - Vendored runtime installation now includes its MIT license notice in `.baton/runtime/LICENSE`.
