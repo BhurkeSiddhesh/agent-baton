@@ -49,6 +49,8 @@ baton plan import .baton/proposals/<timestamp>.json --dry-run
 baton plan import .baton/proposals/<timestamp>.json
 ```
 
+For a packet with a custom `test` shell command imported from a proposal, inspect its text before `baton verify <packet> --allow-shell`. Plain `baton verify <packet>` refuses packet-defined shell code by default. A project-level test command configured explicitly during initialization continues to run without this flag. Never run untrusted commands with production secrets.
+
 `split --run` never applies anything; it saves a validated proposal under `.baton/proposals/`. Known runners are
 `claude` (`claude -p`), `codex` (`codex exec -`) and `gemini` (`gemini -p`); any other value is run as a shell command.
 Add `--dry-run` to see the command first.

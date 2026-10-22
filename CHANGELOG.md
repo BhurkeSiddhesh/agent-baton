@@ -13,6 +13,8 @@ All notable changes to Agent Baton are documented here. The format follows
 
 ### Fixed
 
+- `verify` now refuses packet-level shell tests imported from a plan unless `--allow-shell` is supplied explicitly; validates test timeout bounds, with refusal and authorized-execution regression coverage. Existing project-level configured tests work unchanged.
+
 - Generated cloud workflows now require a trusted, explicit `@claude` **comment** instead of automatically running on issue bodies; pin workflow action commits and document secret/permission boundaries. Existing installations must run `baton upgrade --cloud` and review any `.baton-new` files before enabling revised workflows.
 
 - Vendored runtime installation now includes its MIT license notice in `.baton/runtime/LICENSE`.

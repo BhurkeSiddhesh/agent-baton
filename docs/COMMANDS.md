@@ -530,7 +530,7 @@ Options:
 ### baton verify
 
 ```text
-baton verify <packet> [--no-tests] [--json]
+baton verify <packet> [--allow-shell] [--no-tests] [--json]
 
 Scope guard, secret scan and tests; writes the verify marker
 
@@ -538,11 +538,13 @@ Checks the files this packet changed against its owned paths (protected paths an
 scans them for secrets (plus commit history on a branch), runs the test command and records a verify marker and event.
 Scope modes: git-branch (HEAD on a non-main branch), git-shared (on main), snapshot (no git).
 "baton submit" needs a passing, current marker. --no-tests only checks scope and secrets and can never be submitted.
+Imported packet-specific test commands are untrusted; inspect them and pass --allow-shell to execute. Project-level configured tests retain their existing behavior.
 
 Options:
-      --no-tests  skip the test command (the result is never submittable)
-      --json      print one JSON document
-  -h, --help      show this help
+      --allow-shell  explicitly run a packet-defined shell test command
+      --no-tests     skip the test command (the result is never submittable)
+      --json         print one JSON document
+  -h, --help         show this help
 ```
 
 ### baton submit
