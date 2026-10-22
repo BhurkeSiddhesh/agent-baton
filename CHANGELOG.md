@@ -8,6 +8,8 @@ All notable changes to Agent Baton are documented here. The format follows
 
 ### Added
 
+- A tag-only release candidate job after the full CI release gate, with strict tag/package-version validation, offline package checks, SHA-256 artifacts, and negative status regression tests; no automatic package publication.
+
 - Documented maintainer and contributor responsibilities, pre-1.0 compatibility, deprecation, migration and release approval expectations; clarified external platform escalation for maintainer-related conduct reports.
 - Included governance-linked policy files in the npm distribution so local documentation links work.
 
