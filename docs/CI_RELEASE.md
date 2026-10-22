@@ -12,7 +12,7 @@ The [CI workflow](../.github/workflows/ci.yml) runs on pull requests, pushes to 
 | Security regressions | Ubuntu, Windows, macOS / Node 20 | Hook guard, credential patterns and documented trust boundaries |
 | Install/doctor smoke | Ubuntu, Windows, macOS / Node 20 | Clean scratch-repo initialization and uninstall |
 | Docs | Ubuntu / Node 20 | Relative links, anchor integrity, generated CLI reference parity |
-| Package integrity | Ubuntu / Node 20 | Expected archive entries, excluded secrets/dev state, offline tarball install |
+| Package integrity | Ubuntu / Node 20 | Archive validation, offline install, cold-start/footprint measurements and no-network CLI smoke |
 | Release gate | Version-tag validation only | Requires all seven job groups to succeed **and** tag to equal `v` + package version; cancellation/skip/failure never counts as ready |
 | Release candidate | Version tags, after release gate succeeds | Re-packs the tagged tree, validates the archive, computes SHA-256 and uploads an installable tarball without publishing |
 
@@ -52,3 +52,11 @@ See the [branch and tag protection runbook](BRANCH_PROTECTION.md) for the exact 
 ### Failure-mode evidence
 
 `tests/ci-release-gates.test.js` tests failure/cancellation/skip/pending/missing status results for **every** required job, verifies tag/version mismatches, and tests exact package-checksum metadata. These are synthetic negative cases: tag-triggered release candidate creation must still be verified on an authorized version-tag event. A PR run does not simulate a published tag. No auto-publisher or GitHub release is created by this workflow.
+
+## Offline core footprint and network budget (BAT-079)
+
+The current core has zero required runtime dependencies and does not bundle a daemon, container service, MCP server or dashboard. Optional services must use separate distributions. The package validator enforces this boundary. The existing CI package lane installs the real tarball offline and runs initialization, doctor and check.
+
+The package lane records the npm tarball's compressed bytes, unpacked bytes and file count plus five cold Node 20 CLI startup samples, with a p95. Conservative ceilings are 10 MiB compressed, 50 MiB unpacked and 3,000 ms p95 for baton version. These ceilings prevent accidental package inflation; they are not advertised customer benchmarks. The JSON report is retained in the package-manifest artifact.
+
+A Node preload denies socket connections, HTTP, HTTPS, DNS and fetch during a CLI startup smoke. This tests Node-level network access only: it does not sandbox shell tools or authorized agent integrations. No remote provider or Docker is required for core installation. Compare the recorded metrics and investigate changes during every release.

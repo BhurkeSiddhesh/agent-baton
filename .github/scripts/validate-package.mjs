@@ -22,6 +22,9 @@ export function validatePackage(entry, pkg) {
     /(^|\/)(?:\.env(?:\..*)?|\.git|node_modules|\.baton|\.github)(?:\/|$)/i.test(p) ||
     /(?:^|\/)(?:\.envrc|id_rsa|id_ed25519|\.npmrc|\.pypirc|[^/]+\.pem|[^/]+\.key)$/i.test(p));
   for (const item of forbidden) problems.push('unexpected sensitive or development-only file ' + item);
+  for (const item of paths) {
+    if (/^(?:dashboard|daemon|mcp-server|containers|optional-services)\//i.test(item)) problems.push('optional service bundled in offline core: ' + item);
+  }
   for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
     if (Object.keys(pkg[field] || {}).length) problems.push(`runtime dependencies must remain empty (${field})`);
   }
