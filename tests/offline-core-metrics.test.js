@@ -23,7 +23,7 @@ test('p95 cold startup summary measures without hiding failures', () => {
 
 test('CLI version runs with Node network activity denied', () => {
   const binary = fileURLToPath(new URL('../bin/baton.js',import.meta.url));
-  const shim = fileURLToPath(new URL('../.github/scripts/deny-network.mjs',import.meta.url));
+  const shim = new URL('../.github/scripts/deny-network.mjs',import.meta.url).href;
   const run = spawnSync(process.execPath,['--import',shim,binary,'version'],{encoding:'utf8',timeout:5000});
   assert.equal(run.status,0,run.stderr);
   assert.match(run.stdout, /baton|0\.1\.0/i);
