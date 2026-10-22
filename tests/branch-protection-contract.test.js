@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { evaluateRequiredResults, REQUIRED_CI_JOBS } from '../.github/scripts/assert-required-ci.mjs';
 
 test('branch protection aggregator rejects anything except all success', () => {
   const ci = fs.readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
@@ -12,7 +15,7 @@ test('branch protection aggregator rejects anything except all success', () => {
   for (const job of ['test', 'unit', 'integration', 'security', 'package', 'smoke', 'docs']) {
     assert.ok(gate.includes('needs.' + job + '.result'), 'gate omitted ' + job);
   }
-  assert.match(gate, /if \[ "\$result" != "success" \]/);
+  assert.match(gate, /assert-required-ci\\.mjs/);
 });
 
 test('branch/tag protection runbook discloses settings limitation and requires checks', () => {
@@ -26,4 +29,20 @@ test('branch/tag protection runbook discloses settings limitation and requires c
   assert.match(runbook, /does not configure or verify/);
   assert.match(release, /BRANCH_PROTECTION\.md/);
   assert.match(contributing, /BRANCH_PROTECTION\.md/);
+});
+
+test('branch gate rejects simulated failure, cancellation, skip and missing jobs', () => {
+  const statuses = REQUIRED_CI_JOBS.map(() => 'success');
+  assert.equal(evaluateRequiredResults(statuses).ok, true);
+  for (const state of ['failure', 'cancelled', 'skipped', 'pending', '']) {
+    const incorrect = [...statuses];
+    incorrect[3] = state;
+    const result = evaluateRequiredResults(incorrect);
+    assert.equal(result.ok, false, 'unexpectedly accepted ' + JSON.stringify(state));
+    assert.match(result.failed.join(', '), /security=/);
+  }
+  assert.equal(evaluateRequiredResults(statuses.slice(1)).ok, false);
+  const helper = fileURLToPath(new URL('../.github/scripts/assert-required-ci.mjs', import.meta.url));
+  assert.equal(spawnSync(process.execPath, [helper, ...statuses], { encoding: 'utf8' }).status, 0);
+  assert.equal(spawnSync(process.execPath, [helper, ...statuses.slice(1)], { encoding: 'utf8' }).status, 1);
 });

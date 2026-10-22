@@ -248,11 +248,11 @@ jobs:
       - name: Reject failed, cancelled or skipped prerequisites
         shell: bash
         run: |
-          set -eu
-          for result in "${{ needs.test.result }}" "${{ needs.unit.result }}" "${{ needs.integration.result }}" "${{ needs.security.result }}" "${{ needs.package.result }}" "${{ needs.smoke.result }}" "${{ needs.docs.result }}"; do
-            if [ "$result" != "success" ]; then
-              echo "branch protection blocked: required job result=$result" >&2
-              exit 1
-            fi
-          done
-          echo "All required CI jobs passed for ${GITHUB_SHA}."
+          node .github/scripts/assert-required-ci.mjs \
+            "${{ needs.test.result }}" \
+            "${{ needs.unit.result }}" \
+            "${{ needs.integration.result }}" \
+            "${{ needs.security.result }}" \
+            "${{ needs.package.result }}" \
+            "${{ needs.smoke.result }}" \
+            "${{ needs.docs.result }}"
