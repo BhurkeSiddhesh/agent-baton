@@ -10,14 +10,16 @@ import { stamp, utcnow } from '../lib/util.js';
 export const name = 'verify';
 export const group = 'Execution';
 export const summary = 'Scope guard, secret scan and tests; writes the verify marker';
-export const usage = 'baton verify <packet> [--no-tests] [--json]';
+export const usage = 'baton verify <packet> [--allow-shell] [--no-tests] [--json]';
 export const description = [
   'Checks the files this packet changed against its owned paths (protected paths and other packets\' files are violations),',
   'scans them for secrets (plus commit history on a branch), runs the test command and records a verify marker and event.',
   'Scope modes: git-branch (HEAD on a non-main branch), git-shared (on main), snapshot (no git).',
   '"baton submit" needs a passing, current marker. --no-tests only checks scope and secrets and can never be submitted.',
+  'Imported packet-specific test commands are untrusted; inspect them and pass --allow-shell to execute. Project-level configured tests retain their existing behavior.',
 ].join('\n');
 export const options = {
+  'allow-shell': { type: 'boolean', description: 'explicitly run a packet-defined shell test command' },
   'no-tests': { type: 'boolean', description: 'skip the test command (the result is never submittable)' },
   json: { type: 'boolean', description: 'print one JSON document' },
 };
@@ -120,7 +122,7 @@ export function classify(files, packet, plan, config, mode) {
  * Run the full verification for a packet and record the marker and event.
  * @returns {Promise<object>} the result written to the marker
  */
-export async function verifyPacket(ctx, pid, { runTests = true } = {}) {
+export async function verifyPacket(ctx, pid, { runTests = true, allowShell = false } = {}) {
   const root = ctx.root;
   const { config, plan, state } = load(root);
   const packet = plan.packets.find((p) => p.id === pid);
@@ -136,7 +138,8 @@ export async function verifyPacket(ctx, pid, { runTests = true } = {}) {
   const secrets = scanFiles(root, files).map(formatSecretHit);
   if (mode.startsWith('git-branch') && base) secrets.push(...scanHistory(root, base).map(formatSecretHit));
 
-  const command = packet.test || config.test?.command || '';
+  const packetCommand = typeof packet.test === 'string' ? packet.test.trim() : '';
+  const command = packetCommand || config.test?.command || '';
   const tests = { ran: false, ok: null, tail: '', command, exitCode: null, timedOut: false, ms: 0 };
   if (!runTests) {
     problems.push('tests not run (--no-tests): a sign-off needs a test run');
@@ -144,9 +147,15 @@ export async function verifyPacket(ctx, pid, { runTests = true } = {}) {
     if (config.test?.required === false) tests.ok = true;
     else problems.push('no test command configured (set test.command in .baton/config.json)');
   } else {
+    if (packetCommand && !allowShell) {
+      throw new UsageError('refusing untrusted packet test command; inspect packet.test in .baton/plan.json and pass --allow-shell to authorize this shell execution');
+    }
     const secs = Number(config.test?.timeoutSeconds ?? 900);
+    if (!Number.isFinite(secs) || secs < 1 || secs > 86400) {
+      throw new UsageError('test.timeoutSeconds must be a finite number between 1 and 86400');
+    }
     // Test commands are shell commands (possibly from an imported plan): say what runs before it runs.
-    ctx.err(`baton: running ${packet.test ? 'packet' : 'project'} test command: ${command}`);
+    ctx.err(`baton: running ${packetCommand ? 'explicitly authorized packet SHELL' : 'configured project'} test command: ${command}`);
     const r = await runShell(command, { cwd: root, env: { ...process.env, ...ctx.env }, timeoutMs: secs * 1000 });
     tests.ran = true;
     tests.exitCode = r.code;
@@ -195,7 +204,7 @@ export function render(r) {
 export async function run(ctx, args) {
   const pid = args._[0];
   if (!pid) throw new UsageError(`missing packet id. Usage: ${usage}`);
-  const r = await verifyPacket(ctx, pid, { runTests: !args['no-tests'] });
+  const r = await verifyPacket(ctx, pid, { runTests: !args['no-tests'], allowShell: Boolean(args['allow-shell']) });
   if (args.json) ctx.json(r);
   else ctx.out(render(r));
   // A scope-only check is informational: it is not "ok" (never submittable) but it did not find a violation.
