@@ -131,7 +131,7 @@ jobs:
       - name: Measure core archive and startup budgets
         run: node .github/scripts/offline-core-metrics.mjs pack.json offline-core-metrics.json
       - name: Network-denial core smoke
-        run: node --import .github/scripts/deny-network.mjs bin/baton.js version
+        run: node --import ./.github/scripts/deny-network.mjs bin/baton.js version
       - name: Verify installation from the actual tarball offline
         shell: bash
         run: |
