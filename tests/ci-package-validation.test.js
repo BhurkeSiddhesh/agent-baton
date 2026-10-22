@@ -24,3 +24,10 @@ test('pack validation rejects credentials, internal metadata and leaked state', 
     assert.ok(validatePackage(entry([bad]), pkg).some((s) => s.includes(bad)), bad);
   }
 });
+
+test('optional services never inflate the offline core tarball', () => {
+  for (const path of ['dashboard/app.js','daemon/runner.js','mcp-server/index.js','containers/Dockerfile','optional-services/worker.js']) {
+    assert.ok(validatePackage(entry([path]), pkg).some(p => p.includes(path)), path);
+  }
+  assert.deepEqual(validatePackage(entry(['docs/MCP.md']), pkg), []);
+});
