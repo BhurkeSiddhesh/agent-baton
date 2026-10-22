@@ -6,6 +6,10 @@ on:
   issues:
     types: [labeled]
 
+concurrency:
+  group: baton-dispatch-$[[ github.event.issue.number ]]
+  cancel-in-progress: false
+
 permissions:
   issues: write
 

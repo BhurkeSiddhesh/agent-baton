@@ -13,6 +13,8 @@ All notable changes to Agent Baton are documented here. The format follows
 
 ### Fixed
 
+- Generated cloud workflows now require a trusted, explicit `@claude` **comment** instead of automatically running on issue bodies; pin workflow action commits and document secret/permission boundaries. Existing installations must run `baton upgrade --cloud` and review any `.baton-new` files before enabling revised workflows.
+
 - Vendored runtime installation now includes its MIT license notice in `.baton/runtime/LICENSE`.
 
 ## [0.1.0] - 2026-10-13
