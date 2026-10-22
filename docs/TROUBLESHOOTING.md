@@ -171,8 +171,7 @@ Upgrade the runtime: `npx github:BhurkeSiddhesh/agent-baton upgrade`.
 `baton ledger export` copies local events into `.baton/ledger/`; `baton ledger import` does the reverse.
 
 **Another process holds the lock.**
-Baton uses a lockfile around appends; a stale lock (dead process or older than five minutes) is broken automatically with a
-note. If it persists, make sure no `baton` process is hung, then retry.
+Baton uses a lockfile around local ledger writes. Only a dead PID **verified on this host**, or an incomplete lock file past its grace period, is recovered automatically with a diagnostic. A live PID lock is never broken because it is old; locks from an unverified remote host require manual inspection. If a lock persists, confirm the holder host/PID and stop or await the owner before removing the file. On shared/network filesystems use a dedicated coordinator: this advisory local lock is not distributed consensus.
 
 <a id="cloud"></a>
 ## Cloud
