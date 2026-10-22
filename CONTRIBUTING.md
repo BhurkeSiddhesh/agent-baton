@@ -86,6 +86,8 @@ To add an adapter, add its detection and file entries to `templates/adapters.jso
 
 ## Pull requests
 
+Before merging, consult the [branch and tag protection runbook](docs/BRANCH_PROTECTION.md). GitHub rulesets must be activated in repository settings; a documented gate alone cannot block an unauthorized push. The sole-maintainer recovery process must be audited.
+
 Follow the [governance and compatibility policy](docs/GOVERNANCE.md): reference a tracked issue, disclose CLI/config/ledger compatibility and rollback impact, and include real CI evidence. A review by a different Baton roster ID alone is not proof of an independent human review. Mark partial implementation with `Refs #N`, not `Closes #N`.
 
 1. Branch from `main`, keep the change focused, and add or update tests.

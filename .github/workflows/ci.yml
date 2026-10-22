@@ -237,3 +237,23 @@ jobs:
             fi
           done
           echo "All required checks passed for tag ${GITHUB_REF_NAME}."
+
+  branch_ready:
+    name: branch protection gate (all required CI checks)
+    if: always() && !startsWith(github.ref, 'refs/tags/v')
+    needs: [test, unit, integration, security, package, smoke, docs]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject failed, cancelled or skipped prerequisites
+        shell: bash
+        run: |
+          node .github/scripts/assert-required-ci.mjs \
+            "${{ needs.test.result }}" \
+            "${{ needs.unit.result }}" \
+            "${{ needs.integration.result }}" \
+            "${{ needs.security.result }}" \
+            "${{ needs.package.result }}" \
+            "${{ needs.smoke.result }}" \
+            "${{ needs.docs.result }}"
