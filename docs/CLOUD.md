@@ -56,7 +56,7 @@ branch and directory for local agents.
 
 ```bash
 baton dispatch WP-007 --dry-run                     # print the command and issue body, change nothing
-baton dispatch WP-007 --to claude                   # mention @claude (runs the baton-claude workflow)
+baton dispatch WP-007 --to claude                   # create the issue; an authorized human must comment @claude to start
 baton dispatch WP-007 --to copilot                  # assigns the issue to Copilot instead of an @mention
 baton dispatch WP-007 --to codex --repo me/project  # mention @codex
 baton dispatch WP-007                               # --to any (default)
@@ -75,7 +75,7 @@ sidecar):
 | File | Trigger | What it does |
 |---|---|---|
 | `.github/workflows/baton-ci.yml` | pull requests, pushes to main | `baton check`; for a `baton/<packet>` branch also `verify --no-tests` (scope guard and secret scan) and your test command; renders `STATUS.md` into the job summary |
-| `.github/workflows/baton-claude.yml` | `@claude` in comments or issues | runs `anthropics/claude-code-action@v1` with `BATON_AGENT=claude` and a system prompt that tells it to follow `AGENTS.md`, begin a packet, stay in scope, verify and submit |
+| `.github/workflows/baton-claude.yml` | `@claude` in an OWNER/MEMBER/COLLABORATOR issue or PR-review comment only | runs a commit-pinned Claude action with `BATON_AGENT=claude` and a system prompt that tells it to follow `AGENTS.md`, begin a packet, stay in scope, verify and submit |
 | `.github/workflows/baton-dispatch.yml` | issue labelled `baton` | comments the cloud-agent instructions (read `AGENTS.md`, `check`, `begin --pull`, stay in `owns`, `verify`, `submit`, open a PR from `baton/<packet>`) |
 | `.github/PULL_REQUEST_TEMPLATE.md` | pull requests | sign-off checklist: packet id, pasted verify output, findings; written only if you have none |
 
@@ -83,7 +83,7 @@ sidecar):
 
 Prerequisites: install the Claude GitHub app on the repository and add the repository secret `ANTHROPIC_API_KEY`
 (Settings, Secrets and variables, Actions). The workflow references the secret and never inlines it. Then comment
-`@claude take WP-007` on an issue, or use `baton dispatch WP-007 --to claude`.
+`@claude take WP-007` on an issue from a trusted repository member/collaborator. `baton dispatch WP-007 --to claude` **only creates an issue**; a trusted person must comment afterward to trigger the agent. The comment author must also have actual GitHub write access (enforced by Claude Code Action). Opening an issue with `@claude` in its body or title, or commenting from a FIRST_TIME_CONTRIBUTOR/NONE association, does not start the write-capable job.
 
 ### Copilot coding agent
 
@@ -103,7 +103,7 @@ be installed because the runtime is vendored in `.baton/runtime/`.
 
 ## A cloud packet end to end
 
-1. Orchestrator: `baton dispatch WP-007 --to claude` creates an issue with the brief.
+1. Orchestrator: `baton dispatch WP-007 --to claude` creates an issue with the brief. A trusted repository member comments `@claude take WP-007` before cloud execution begins.
 2. The cloud agent checks out a branch `baton/WP-007-csv-export`, runs `baton check`, then
    `baton begin WP-007 --agent claude --pull` if the packet is assigned to someone else (announced on the bus).
 3. It edits only the packet's files, commits, runs `baton verify WP-007`, then `baton submit WP-007 --agent claude`.
@@ -113,6 +113,10 @@ be installed because the runtime is vendored in `.baton/runtime/`.
    `baton review WP-007` and `baton accept|fix|reject WP-007 --by <reviewer>`. The verdict is another ledger file that
    goes onto the branch or main.
 7. The orchestrator runs `baton merge WP-007 --by <orchestrator>` or merges through the PR; main then carries the events.
+
+## Generated workflow security boundary
+
+`init --cloud` generates pinned GitHub Actions dependencies (recorded SHA and matching release version) to avoid tag drift. Update SHAs only after reviewing upstream release notes and re-running integration tests; these are snapshots and require periodic security maintenance. The Claude trigger runs only for `issue_comment` and `pull_request_review_comment` events with `OWNER`, `MEMBER` or `COLLABORATOR` association and an explicit `@claude` mention. Its token and `ANTHROPIC_API_KEY` remain available **only within that authorized job**; do not add `pull_request_target`, `workflow_run`, fork checkout, or arbitrary user-controlled shell interpolation. `id-token: write` is required for the provider action's GitHub authentication workflow, not for Baton's offline core. An association is not a GitHub permission proof; the provider action performs an additional write-permission check. The workflow cannot stop a trusted maintainer from relaying malicious content to an agent; restrict runner secrets and require separate code review and branch protection.
 
 ## Limits to know
 
