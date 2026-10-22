@@ -25,6 +25,8 @@ This applies in all project spaces (issues, pull requests, discussions) and when
 
 ## Enforcement
 
+The maintainer's handling, confidentiality and review responsibilities are also described in the [governance policy](docs/GOVERNANCE.md). The project does not currently have an independent project-level reporting contact. If the complaint concerns the maintainer, **do not submit it to that maintainer**: use GitHub's platform-level **Report abuse** channel for conduct occurring on GitHub. GitHub handles platform reports under its own rules and does not guarantee an independent Agent Baton project review. Do not publish confidential allegations in issues or comments.
+
 Maintainers may remove, edit or reject comments, commits, issues and other contributions that violate this code, and may
 temporarily or permanently ban contributors for behaviour they judge inappropriate. Report problems privately through
 GitHub's private reporting on the repository (see [SECURITY.md](SECURITY.md)) or to the maintainer,
