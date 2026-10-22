@@ -15,7 +15,7 @@ test('branch protection aggregator rejects anything except all success', () => {
   for (const job of ['test', 'unit', 'integration', 'security', 'package', 'smoke', 'docs']) {
     assert.ok(gate.includes('needs.' + job + '.result'), 'gate omitted ' + job);
   }
-  assert.match(gate, /assert-required-ci\\.mjs/);
+  assert.match(gate, /assert-required-ci\.mjs/);
 });
 
 test('branch/tag protection runbook discloses settings limitation and requires checks', () => {
