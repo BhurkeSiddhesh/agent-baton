@@ -42,3 +42,7 @@ The `node --test` wildcard commands above assume shell glob expansion (as used b
 5. Only then, from a separately approved release workflow or manually, publish the package and verify a clean installation. Do not place write tokens in untrusted pull-request jobs.
 
 **Limits:** The gate verifies the workflow results for the tag but does not authenticate the tag pusher, sign artifacts, create branch protections, or publish a release. A separate protected publisher is required for automatic releases.
+
+## Enforcing branch and tag rules
+
+See the [branch and tag protection runbook](BRANCH_PROTECTION.md) for the exact required status contexts, GitHub ruleset steps, failure-mode tests and sole-maintainer recovery process. GitHub rules must be enabled separately; CI jobs do not activate branch protection.
