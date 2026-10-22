@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "owner": "BhurkeSiddhesh",
+  "runnerRoot": "C:\\github-runners",
+  "maxConcurrent": 1,
+  "minimumFreeDiskGb": 25,
+  "staleWorkspaceHours": 24,
+  "requirePrivateRepository": true,
+  "repositories": [
+    {
+      "name": "agent-baton",
+      "enabled": true,
+      "runnerName": "siddhesh-laptop-agent-baton-01",
+      "labels": ["agent-baton", "trusted-push"],
+      "workDirectory": "_work"
+    }
+  ]
+}
