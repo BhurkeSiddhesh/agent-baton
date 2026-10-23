@@ -13,7 +13,7 @@ const optionalBoolean = (value) => value == null || typeof value === 'boolean';
 const optionalNumber = (value) => value == null || (typeof value === 'number' && Number.isFinite(value));
 
 const dataRules = {
-  begin: { base: optionalString, lease_until: optionalString, dep_commits: (v) => v == null || isObject(v) },
+  begin: { base: optionalString, lease_until: optionalString, dep_commits: (v) => v == null || isObject(v), expected_rev: (v) => v == null || (Number.isInteger(v) && v >= 0) },
   heartbeat: { lease_until: string },
   reclaim: { lease_until: optionalString, from: optionalString },
   ready: { commit: optionalString, tests: optionalString },

@@ -475,15 +475,16 @@ Options:
 ### baton begin
 
 ```text
-baton begin <packet> --agent <id> [--pull] [--json]
+baton begin <packet> --agent <id> [--pull] [--expected-rev <rev>] [--json]
 
 Start (or restart) a packet: lease, snapshot and claim
 
 Options:
-  -a, --agent <v>  acting agent id (or BATON_AGENT)
-      --pull       take a packet assigned to another agent (announced on the bus)
-      --json       print a JSON document
-  -h, --help       show this help
+  -a, --agent <v>         acting agent id (or BATON_AGENT)
+      --pull              take a packet assigned to another agent (announced on the bus)
+      --expected-rev <n>  CAS revision check: require exact packet stream revision
+      --json              print a JSON document
+  -h, --help              show this help
 ```
 
 ### baton heartbeat

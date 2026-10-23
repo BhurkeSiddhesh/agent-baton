@@ -181,9 +181,10 @@ Constants (Sets unless noted): `STATUSES[]`, `TRANSITIONS{status: Set}`, `DONE` 
 `REWORK`, `REVIEW_OUTCOMES`, `MESSAGE_TYPES[]` (spec types plus `SIGNOFF`), `SEVERITIES[]`, `RESOLUTIONS[]`.
 
 ### Queries
-- `flags(pid, plan, state, {config, now}) -> string[]`: `NO_LEASE`, `STALE`, `AT_RISK:<dep>=<status>`, `AT_RISK:<dep>-changed` (ignored while the recorded commit was `unbuilt`), `ESCALATE`, `GATE_CLOSED:<id>`.
+- `flags(pid, plan, state, {config, now}) -> string[]`: `NO_LEASE`, `STALE`, `AT_RISK:<dep>=<status>`, `AT_RISK:<dep>-changed` (ignored while the recorded commit was `unbuilt`), `ESCALATE`, `GATE_CLOSED:<id>`, `CLAIM_CONFLICT:<claimants>`.
 - `blockingDeps(packet, plan, state) -> ids[]` (same-track deps not yet reviewable, plus `needs_done` not ACCEPTED), `gateBlocks(packet, state)`, `reviewerOf(pid, state)`.
 - `readyPackets(plan, state) -> packet[]` (PLANNED/CARRIED_OVER/REJECTED, deps and gate satisfied, no ownership overlap with IN_PROGRESS work).
+- `confirmClaim(root, pid, agent) -> {confirmed, owner, conflict, competitors, reason?}`: checks whether an agent's claim is the authoritative active owner or lost/contested in arbitration.
 - `nextFor(agent, plan, state, {config, now}) -> {agent, awaitingReview, reworkOwed, own, stretch, pull, unassigned, staleReclaimable, audit}`: lists of packet ids. Ranking: carried/rejected first,
   milestone due date, priority, own lane, id.
 - `findingsOf(events, pid?) -> [{fid, packet, severity, file, line, evidence, fix, against, by, text, ts, status: 'open'|'resolved'|'closed', resolution, resolvedBy, closedBy}]`,
@@ -193,17 +194,17 @@ Constants (Sets unless noted): `STATUSES[]`, `TRANSITIONS{status: Set}`, `DONE` 
 - `progress(plan, state, {now}) -> {milestones: [{id, title, due, daysLeft, total, done, inReview, inProgress, blocked, notStarted, gated[], percent, overdue}], overall: {done, total, percent}, closedGates, now}`
   (stretch packets excluded; ACCEPTED is done; packets without a milestone form a last row with `id: null`).
 - `auditEvents(plan, events, config) -> [{id, severity: 'error', problem, acked}]`: illegal transitions, IN_PROGRESS without `begin`, ready at an unverified commit, verdicts by a
-  non-reviewer or a contributor, events for unknown packets. `baton check` should combine this with `verifyLedger`, `validatePlan` and `flags` (`STALE`).
+  non-reviewer or a contributor, conflicting simultaneous claims on already held packets, events for unknown packets. `baton check` should combine this with `verifyLedger`, `validatePlan` and `flags` (`STALE`).
 
 ### Mutations (all take the state lock, validate, append events, and throw BatonError with the codes shown)
 | Function | Effect and refusal codes |
 |---|---|
 | `transition(root, pid, to, {by, note, kind, data})` | the full rule set; returns the event. `BAD_TRANSITION`, `BEGIN_ONLY`, `DEPS_UNMET`, `GATE_CLOSED`, `OWNERSHIP_CLASH`, `NO_REVIEWER`, `NOT_REVIEWER`, `REVIEWER_CONFLICT`, `OPEN_FINDINGS`, `REJECT_NEEDS_REASON`, `NOT_VERIFIED`, `DIRTY_TREE`, `STALE_VERIFY`, `IDENTITY` |
-| `begin(root, pid, agent, {pull}) -> {event, pulledEarly, rework, owns, leaseUntil, base}` | lease + snapshot + CLAIM message. Also `NOT_YOURS`, `ALREADY_STARTED`, `ALREADY_DONE`, `NOT_CONTRIBUTOR`, `NOT_WORKER`, `UNKNOWN_AGENT` |
+| `begin(root, pid, agent, {pull, expectedRev}) -> {event, pulledEarly, rework, owns, leaseUntil, base}` | lease + snapshot + CLAIM message. Also `NOT_YOURS`, `ALREADY_STARTED`, `ALREADY_DONE`, `NOT_CONTRIBUTOR`, `NOT_WORKER`, `UNKNOWN_AGENT`, `STALE_REVISION` |
 | `heartbeat(root, pid, agent) -> leaseUntil` | `NOT_IN_PROGRESS`, `HELD` |
 | `reclaim(root, pid, agent) -> {event, leaseUntil}` | needs `STALE` or `NO_LEASE`; `NOT_STALE` |
 | `block(root, pid, {by, reason, question})` | BLOCKED + BLOCKER message; `NEEDS_REASON`, `HELD` |
-| `submit(root, pid, {by, note})` | READY_FOR_REVIEW (event kind `ready`) + SIGNOFF message |
+| `submit(root, pid, {by, note})` | READY_FOR_REVIEW (event kind `ready`) + SIGNOFF message; throws `HELD` if the packet is held by another agent or if a conflicting claim was won by another claimant |
 | `verdict(root, pid, outcome, {by, note, score})` | `ACCEPTED \| ACCEPTED_WITH_FIXES \| REJECTED` + VERDICT message; `BAD_SCORE` |
 | `carry(root, pid, {by, note})` | REJECTED to CARRIED_OVER, orchestrator/human only (`NOT_ORCHESTRATOR`) |
 | `reassignReviewer(root, pid, reviewer, {by})` | orchestrator/human only; reviewer needs the reviewer role and must not have worked on it |
