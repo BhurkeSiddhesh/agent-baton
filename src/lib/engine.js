@@ -259,10 +259,18 @@ export function nextFor(agent, plan, state, { config = {}, now = utcnow() } = {}
 
 // ------------------------------------------------------------------ identity
 
-/** If BATON_AGENT is set, commands may only act as that agent. */
-export function checkIdentity(claimed, env = process.env) {
-  const me = env.BATON_AGENT;
+/** If BATON_AGENT is set, commands may only act as that agent. Enforces actor-match in GitHub Actions when configured. */
+export function checkIdentity(claimed, env = process.env, config = null) {
+  const me = env?.BATON_AGENT;
   if (me && claimed && me !== claimed) throw new BatonError(`BATON_AGENT=${me} but the command acts as ${claimed}`, { code: 'IDENTITY' });
+  if (config?.security?.requireActorMatch && env?.GITHUB_ACTIONS === 'true' && env?.GITHUB_ACTOR) {
+    const ag = getAgent(config, claimed);
+    if (ag?.github && env.GITHUB_ACTOR.toLowerCase() !== ag.github.toLowerCase()) {
+      throw new BatonError(`GitHub actor "${env.GITHUB_ACTOR}" does not match assigned agent "${claimed}" (expected GitHub username "${ag.github}")`, {
+        code: 'IDENTITY_MISMATCH',
+      });
+    }
+  }
 }
 
 function requireActor(config, id, what = 'actor') {
@@ -367,7 +375,7 @@ export function transition(root, pid, to, { by = null, note = '', kind = 'status
       assertSensitiveReplay(root, { packet: pid, action: `transition to ${to}`, config });
     }
     const p = getPacket(plan, pid);
-    checkIdentity(by);
+    checkIdentity(by, process.env, config);
     const s = state.packets[pid];
     const old = s.status;
     if (!STATUSES.includes(to)) throw new BatonError(`invalid status ${to}`, { code: 'BAD_STATUS' });
@@ -450,7 +458,7 @@ export function begin(root, pid, agent, { pull = false, expectedRev = null, opId
   return withLock(stateDir(root), () => {
     const { config, plan, state } = load(root);
     const p = getPacket(plan, pid);
-    checkIdentity(agent);
+    checkIdentity(agent, process.env, config);
     requireWorker(config, agent);
     if (opId) {
       const existing = findOperationEvents(readEvents(root), opId);
@@ -543,7 +551,7 @@ export function reclaim(root, pid, agent, { opId = null, reassign = null, crashe
   return withLock(stateDir(root), () => {
     const { config, plan, state } = load(root);
     const p = getPacket(plan, pid);
-    checkIdentity(agent);
+    checkIdentity(agent, process.env, config);
     const newAgent = reassign || agent;
     if (reassign) {
       requireActor(config, agent, 'agent');
@@ -1024,6 +1032,12 @@ export function auditEvents(plan, events, config = {}) {
     if (ev.kind === 'verdict') {
       if (ev.by !== s.reviewer) bad(ev, `verdict on ${ev.packet} by ${ev.by}; the reviewer is ${s.reviewer}`);
       if (config.requireDifferentReviewer !== false && s.contributors.includes(ev.by)) bad(ev, `verdict on ${ev.packet} by a contributor (${ev.by})`);
+      if (ev.prov?.gh?.actor) {
+        const revAgent = getAgent(config, s.reviewer);
+        if (revAgent?.github && ev.prov.gh.actor.toLowerCase() !== revAgent.github.toLowerCase()) {
+          bad(ev, `verdict on ${ev.packet} has identity mismatch: GitHub actor "${ev.prov.gh.actor}" does not match reviewer "${s.reviewer}" (${revAgent.github})`);
+        }
+      }
     }
     applyEvent(state, ev);
   }

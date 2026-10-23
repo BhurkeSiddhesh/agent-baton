@@ -7,9 +7,11 @@ import { withLock } from './lock.js';
 import { utcnow, stamp, sha256, canonicalJson, ensureDir, writeFileAtomic, readJson } from './util.js';
 import { LEDGER_VERSION, EVENT_KINDS, EVENT_ID_RE, validateEventSchema } from './event-schema.js';
 import { verifyEventAttestation } from './attestation.js';
+import { resolveExecutionProvenance } from './provenance.js';
 
 export { LEDGER_VERSION, EVENT_KINDS, EVENT_ID_RE, validateEventSchema } from './event-schema.js';
 export { createEventAttestation, verifyEventAttestation, signEvent } from './attestation.js';
+export { resolveExecutionProvenance } from './provenance.js';
 
 /**
  * Local shared store: `<git common dir>/baton` inside git (shared by all worktrees), else `<root>/.baton/state`.
@@ -217,6 +219,9 @@ export function appendEvent(root, partial) {
       hv: LEDGER_VERSION,
     };
     if (partial.op_id != null && String(partial.op_id).trim()) ev.op_id = String(partial.op_id).trim();
+    const prov = partial.prov !== undefined ? partial.prov : resolveExecutionProvenance();
+    if (prov != null) ev.prov = prov;
+    if (partial.sig != null) ev.sig = partial.sig;
     const stream = eventStream(ev);
     const prior = existing.filter((item) => eventStream(item) === stream);
     const parent = prior[prior.length - 1];

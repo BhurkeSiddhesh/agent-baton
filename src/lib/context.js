@@ -2,6 +2,9 @@ import { BatonError, UsageError } from './errors.js';
 import { findRoot, loadConfig, isKnownActor } from './config.js';
 import { loadPlan } from './plan.js';
 import { load } from './engine.js';
+import { resolveExecutionProvenance } from './provenance.js';
+
+export { resolveExecutionProvenance } from './provenance.js';
 
 /** Writable that collects text in memory (tests, in-process command runs). */
 export function memoryStream() {
@@ -27,6 +30,14 @@ export function resolveAgent(config, env, claimed, { required = true } = {}) {
     return null;
   }
   if (!isKnownActor(config, id)) throw new BatonError(`unknown agent "${id}" (roster: ${(config.agents || []).map((a) => a.id).join(', ')})`, { code: 'UNKNOWN_AGENT', hint: 'run "baton agents" to list the roster, or "baton agents add"' });
+  if (config?.security?.requireActorMatch && env?.GITHUB_ACTIONS === 'true' && env?.GITHUB_ACTOR) {
+    const ag = config.agents?.find((a) => a.id === id);
+    if (ag?.github && env.GITHUB_ACTOR.toLowerCase() !== ag.github.toLowerCase()) {
+      throw new BatonError(`GitHub actor "${env.GITHUB_ACTOR}" does not match assigned agent "${id}" (expected GitHub username "${ag.github}")`, {
+        code: 'IDENTITY_MISMATCH',
+      });
+    }
+  }
   return id;
 }
 
@@ -43,6 +54,7 @@ export function buildContext({ cwd = process.cwd(), env = process.env, stdout = 
     root: base,
     env,
     commands,
+    prov: resolveExecutionProvenance(env),
     out: (text = '') => { stdout.write(nl(text)); },
     err: (text = '') => { stderr.write(nl(text)); },
     json: (obj) => { stdout.write(`${JSON.stringify(obj, null, 2)}\n`); },

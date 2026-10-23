@@ -6,6 +6,8 @@ All notable changes to Agent Baton are documented here. The format follows
 
 ## [Unreleased]
 
+- Added execution identity provenance and session tracking (`resolveExecutionProvenance`); separates caller-asserted actor IDs (`--agent`) from verifiable runner and GitHub identities, stamps tamper-evident session IDs (`sess-*`, `gh-*`) and declared trust levels (`github-verified`, `ci-environment`, `local-unverified`) on ledger events, and enforces `requireActorMatch` in `checkIdentity` to prevent GitHub Actions identity spoofing.
+
 - Introduced least-privilege execution profiles (`read-only`, `workspace-write`, `review-only`, `privileged`); enforced in plan validation and tool-call guard hooks (`baton guard`) to restrict file writes, shell execution and network access. Unauthorized escalation to `privileged` by non-orchestrator agents is rejected, and unsupported OS-level/kernel sandbox requests fail closed with explicit enforcement disclosures.
 
 - Enhanced crash and stale-agent recovery (`baton reclaim <packet> [--crashed-pid <pid>] [--reassign <agent>] [--preserve] [--force]`); differentiates expired heartbeats from confirmed dead processes, preserves uncommitted working directory changes into permanent git rescue refs (`refs/baton/rescue/*`), clears stale verify markers to require fresh verification, and blocks reclaimed agents from submitting or heartbeating via incremented fencing tokens (`lease_token`).
