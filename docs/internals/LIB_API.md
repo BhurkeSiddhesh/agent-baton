@@ -175,7 +175,7 @@ All kinds require string `by`; packet kinds require string `packet`; transition 
 `derive(plan, events) -> state = {packets: {id: PacketState}, gates: {id: GateState}}`, `load(root) -> {config, plan, events, state}`, `initialState(plan)`, `applyEvent(state, ev)`, `getPacket(plan, pid)` (throws `UNKNOWN_PACKET`).
 
 `PacketState`: `{id, status, agent (effective author), reviewer (effective), by (current holder), contributors[] (sorted agents who began or heartbeat), leaseUntil, base,
-commit (set by ready), depCommits{}, rejections, lastTs, merged, verdict: {outcome, by, score, ts}|null, blockedReason}`. `GateState`: `{id, title, owner, open, by, ts, note}`.
+commit (set by ready), depCommits{}, rejections, lastTs, merged, verdict: {outcome, by, score, ts}|null, blockedReason, leaseToken}`. `GateState`: `{id, title, owner, open, by, ts, note}`.
 
 Constants (Sets unless noted): `STATUSES[]`, `TRANSITIONS{status: Set}`, `DONE` (ACCEPTED, ACCEPTED_WITH_FIXES), `REVIEWABLE` (READY_FOR_REVIEW + DONE), `ACTIVE`, `STARTABLE`,
 `REWORK`, `REVIEW_OUTCOMES`, `MESSAGE_TYPES[]` (spec types plus `SIGNOFF`), `SEVERITIES[]`, `RESOLUTIONS[]`.
@@ -199,10 +199,10 @@ Constants (Sets unless noted): `STATUSES[]`, `TRANSITIONS{status: Set}`, `DONE` 
 ### Mutations (all take the state lock, validate, append events, and throw BatonError with the codes shown)
 | Function | Effect and refusal codes |
 |---|---|
-| `transition(root, pid, to, {by, note, kind, data})` | the full rule set; returns the event. `BAD_TRANSITION`, `BEGIN_ONLY`, `DEPS_UNMET`, `GATE_CLOSED`, `OWNERSHIP_CLASH`, `NO_REVIEWER`, `NOT_REVIEWER`, `REVIEWER_CONFLICT`, `OPEN_FINDINGS`, `REJECT_NEEDS_REASON`, `NOT_VERIFIED`, `DIRTY_TREE`, `STALE_VERIFY`, `IDENTITY` |
-| `begin(root, pid, agent, {pull, expectedRev}) -> {event, pulledEarly, rework, owns, leaseUntil, base}` | lease + snapshot + CLAIM message. Also `NOT_YOURS`, `ALREADY_STARTED`, `ALREADY_DONE`, `NOT_CONTRIBUTOR`, `NOT_WORKER`, `UNKNOWN_AGENT`, `STALE_REVISION` |
+| `transition(root, pid, to, {by, note, kind, data})` | the full rule set; returns the event. `BAD_TRANSITION`, `BEGIN_ONLY`, `DEPS_UNMET`, `GATE_CLOSED`, `OWNERSHIP_CLASH`, `NO_REVIEWER`, `NOT_REVIEWER`, `REVIEWER_CONFLICT`, `OPEN_FINDINGS`, `REJECT_NEEDS_REASON`, `NOT_VERIFIED`, `DIRTY_TREE`, `STALE_VERIFY`, `STALE_LEASE_TOKEN`, `IDENTITY` |
+| `begin(root, pid, agent, {pull, expectedRev}) -> {event, pulledEarly, rework, owns, leaseUntil, leaseToken, base}` | lease + snapshot + CLAIM message. Also `NOT_YOURS`, `ALREADY_STARTED`, `ALREADY_DONE`, `NOT_CONTRIBUTOR`, `NOT_WORKER`, `UNKNOWN_AGENT`, `STALE_REVISION` |
 | `heartbeat(root, pid, agent) -> leaseUntil` | `NOT_IN_PROGRESS`, `HELD` |
-| `reclaim(root, pid, agent) -> {event, leaseUntil}` | needs `STALE` or `NO_LEASE`; `NOT_STALE` |
+| `reclaim(root, pid, agent) -> {event, leaseUntil, leaseToken}` | needs `STALE` or `NO_LEASE`; `NOT_STALE` |
 | `block(root, pid, {by, reason, question})` | BLOCKED + BLOCKER message; `NEEDS_REASON`, `HELD` |
 | `submit(root, pid, {by, note})` | READY_FOR_REVIEW (event kind `ready`) + SIGNOFF message; throws `HELD` if the packet is held by another agent or if a conflicting claim was won by another claimant |
 | `verdict(root, pid, outcome, {by, note, score})` | `ACCEPTED \| ACCEPTED_WITH_FIXES \| REJECTED` + VERDICT message; `BAD_SCORE` |

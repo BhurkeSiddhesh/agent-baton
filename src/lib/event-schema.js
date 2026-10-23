@@ -13,14 +13,14 @@ const optionalBoolean = (value) => value == null || typeof value === 'boolean';
 const optionalNumber = (value) => value == null || (typeof value === 'number' && Number.isFinite(value));
 
 const dataRules = {
-  begin: { base: optionalString, lease_until: optionalString, dep_commits: (v) => v == null || isObject(v), expected_rev: (v) => v == null || (Number.isInteger(v) && v >= 0) },
-  heartbeat: { lease_until: string },
+  begin: { base: optionalString, lease_until: optionalString, dep_commits: (v) => v == null || isObject(v), expected_rev: (v) => v == null || (Number.isInteger(v) && v >= 0), lease_token: optionalNumber },
+  heartbeat: { lease_until: string, lease_token: optionalNumber },
   reclaim: { lease_until: optionalString, from: optionalString },
   ready: { commit: optionalString, tests: optionalString },
   verdict: { commit: optionalString, score: optionalNumber },
   reviewer: { reviewer: string },
   handoff: { agent: string, from: optionalString },
-  verify: { ok: (v) => typeof v === 'boolean', commit: optionalString, mode: optionalString },
+  verify: { ok: (v) => typeof v === 'boolean', commit: optionalString, mode: optionalString, lease_token: optionalNumber },
   merged: { commit: string, branch: optionalString },
   finding: { fid: string, severity: string, file: optionalString, line: optionalNumber, evidence: optionalString, fix: optionalString, against: optionalString },
   finding_resolved: { fid: string, resolution: string, confirm: optionalBoolean },
