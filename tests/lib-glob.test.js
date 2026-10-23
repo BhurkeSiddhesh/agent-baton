@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { matchPath, patternsOverlap, ownedBy, isProtected, isCoordination } from '../src/lib/glob.js';
+import { matchPath, patternsOverlap, ownedBy, isProtected, isCoordination, isOrchestratorOnly, isReadOnly } from '../src/lib/glob.js';
 
 test('matchPath table', () => {
   const rows = [
@@ -70,18 +70,62 @@ test('ownedBy', () => {
 });
 
 test('isProtected table', () => {
-  const protectedPaths = ['.git/config', 'sub/.git/HEAD', '.env', '.env.local', 'app/.env.production', 'k.pem', 'a/b/k.key', 'x.p12', 'x.pfx',
+  const protectedPaths = [
+    '.git/config', 'sub/.git/HEAD', '.env', '.env.local', 'app/.env.production', 'k.pem', 'a/b/k.key', 'x.p12', 'x.pfx',
     'id_rsa', 'id_rsa.pub', 'gcp-credentials.json', 'client_secret_123.json', 'token.json', 'token-cache.json', 'a.sqlite', 'a.sqlite3', 'db/app.db',
-    'secrets/', 'secrets/x.txt', 'config/secrets/x.txt'];
+    'secrets/', 'secrets/x.txt', 'config/secrets/x.txt',
+    // BAT-016: Certificates
+    'server.crt', 'certs/tls.cer', 'ca.der', 'apple.p8', 'CERTS/SERVER.CRT',
+    // BAT-016: SSH keys
+    'id_ed25519', 'id_ed25519.pub', 'id_ecdsa', 'id_ecdsa.pub', 'ID_ED25519',
+    // BAT-016: Cloud credentials
+    '.aws/credentials', 'aws/credentials', 'sub/.aws/credentials', '.aws/config',
+    'gcloud/credentials.db', 'credentials.db', '.config/gcloud/credentials.db',
+    'azureTokens.json', 'azure-tokens.json', '.azure/accessTokens.json', 'AZURETOKENS.JSON',
+    // BAT-016: Sensitive DBs
+    'analytics.duckdb', 'data/metrics.duckdb', 'ANALYTICS.DUCKDB',
+    'vault.kdbx', 'passwords.kdbx', 'VAULT.KDBX',
+    // BAT-016: Case normalization
+    '.ENV', '.ENV.LOCAL', 'SECRETS/passwords.txt', 'K.PEM', 'ID_RSA',
+  ];
   for (const p of protectedPaths) assert.equal(isProtected(p), true, p);
-  const open = ['.env.example', 'src/env.js', '.gitignore', '.gitattributes', 'README.md', 'src/secrets.js', 'tokens.md', 'docs/key.md', 'a.dbx'];
+  const open = [
+    '.env.example', 'src/env.js', '.gitignore', '.gitattributes', 'README.md', 'src/secrets.js', 'tokens.md', 'docs/key.md', 'a.dbx',
+    'src/cert.js', 'docs/credentials.md', 'src/duckdb-client.js',
+  ];
   for (const p of open) assert.equal(isProtected(p), false, p);
 });
 
-test('isProtected honours extra globs', () => {
+test('isProtected honours extra globs and case insensitivity', () => {
   assert.equal(isProtected('data/raw.csv', ['data/']), true);
+  assert.equal(isProtected('DATA/RAW.CSV', ['data/']), true);
+  assert.equal(isProtected('data/raw.csv', ['DATA/']), true);
   assert.equal(isProtected('x/y.secret', ['*.secret']), true);
+  assert.equal(isProtected('X/Y.SECRET', ['*.secret']), true);
+  assert.equal(isProtected('x/y.secret', ['*.SECRET']), true);
   assert.equal(isProtected('x/y.txt', ['*.secret']), false);
+  assert.equal(isProtected('deploy/keys/prod.txt', ['deploy/keys/**']), true);
+  assert.equal(isProtected('deploy/keys', ['deploy/keys/']), true);
+  assert.equal(isProtected('deploy/keys/', ['deploy/keys/']), true);
+});
+
+test('isOrchestratorOnly and isReadOnly', () => {
+  assert.equal(isOrchestratorOnly('.baton/config.json'), true);
+  assert.equal(isOrchestratorOnly('.baton/CONFIG.json'), true);
+  assert.equal(isOrchestratorOnly('AGENTS.md'), true);
+  assert.equal(isOrchestratorOnly('agents.md'), true);
+  assert.equal(isOrchestratorOnly('docs/GOVERNANCE.md'), true);
+  assert.equal(isOrchestratorOnly('docs/governance.md'), true);
+  assert.equal(isOrchestratorOnly('src/index.js'), false);
+  assert.equal(isOrchestratorOnly('custom/policy.md', ['custom/policy.md']), true);
+  assert.equal(isOrchestratorOnly('CUSTOM/POLICY.MD', ['custom/policy.md']), true);
+
+  assert.equal(isReadOnly('.baton/config.json'), true);
+  assert.equal(isReadOnly('AGENTS.md'), true);
+  assert.equal(isReadOnly('docs/GOVERNANCE.md'), true);
+  assert.equal(isReadOnly('src/index.js'), false);
+  assert.equal(isReadOnly('docs/POLICY.md', ['docs/POLICY.md']), true);
+  assert.equal(isReadOnly('docs/policy.md', ['docs/POLICY.md']), true);
 });
 
 test('isCoordination', () => {

@@ -6,6 +6,7 @@ import { ownedBy, isProtected, isCoordination, BUILTIN_COORDINATION } from '../l
 import { scanFiles, scanHistory, formatSecretHit } from '../lib/secrets.js';
 import { diffSnapshot, packetFingerprint } from '../lib/snapshot.js';
 import { stamp, utcnow } from '../lib/util.js';
+import { hasRole } from '../lib/config.js';
 
 export const name = 'verify';
 export const group = 'Execution';
@@ -109,8 +110,18 @@ function changedFor(root, pid, mode, base, config) {
 export function classify(files, packet, plan, config, mode) {
   const others = plan.packets.filter((q) => q.id !== packet.id);
   const r = { in_scope: [], coordination: [], foreign: [], out_of_scope: [], protected: [] };
+  const isOrch = packet.agent && (packet.agent === config.orchestrator || packet.agent === 'human' || hasRole(config, packet.agent, 'orchestrator'));
+  const hasException = Boolean(packet.allow_protected && isOrch && packet.description && String(packet.description).trim());
+
   for (const f of files) {
-    if (isProtected(f, config.protected?.globs || [])) { r.protected.push(f); r.out_of_scope.push(f); } else if (ownedBy(f, packet.owns)) r.in_scope.push(f);
+    if (isProtected(f, config.protected?.globs || [])) {
+      if (hasException && ownedBy(f, packet.owns)) {
+        r.in_scope.push(f);
+      } else {
+        r.protected.push(f);
+        r.out_of_scope.push(f);
+      }
+    } else if (ownedBy(f, packet.owns)) r.in_scope.push(f);
     else if (isCoordination(f, config.coordination || [])) r.coordination.push(f);
     else if (ORCHESTRATOR_FILES.includes(f)) (mode.startsWith('git-branch') ? r.out_of_scope : r.coordination).push(f);
     else if (others.some((q) => ownedBy(f, q.owns))) (mode === 'git-branch' ? r.out_of_scope : r.foreign).push(f);

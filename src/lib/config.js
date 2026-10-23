@@ -143,7 +143,59 @@ export function validateConfig(cfg) {
   if (!Number.isInteger(cfg.escalateAfterRejections) || cfg.escalateAfterRejections < 1) errors.push('config.escalateAfterRejections must be an integer >= 1');
   if (!isObj(cfg.guard) || !GUARD_MODES.includes(cfg.guard.mode)) errors.push(`config.guard.mode must be one of ${GUARD_MODES.join('|')}`);
   for (const k of ['coordination']) if (!Array.isArray(cfg[k])) errors.push(`config.${k} must be an array`);
-  if (!isObj(cfg.protected) || !Array.isArray(cfg.protected.globs)) errors.push('config.protected.globs must be an array');
+  if (!isObj(cfg.protected)) {
+    errors.push('config.protected must be an object');
+  } else {
+    if (!Array.isArray(cfg.protected.globs)) {
+      errors.push('config.protected.globs must be an array');
+    } else {
+      for (const g of cfg.protected.globs) {
+        if (typeof g !== 'string' || !g.trim()) {
+          errors.push(`config.protected.globs entries must be non-empty strings (got ${JSON.stringify(g)})`);
+        } else if (g.startsWith('!')) {
+          errors.push(`config.protected.globs entries must not be negative/exclusion patterns (got ${JSON.stringify(g)})`);
+        } else if (g.includes('\\')) {
+          errors.push(`config.protected.globs entry ${JSON.stringify(g)} must use forward slashes`);
+        } else if (g.split('/').includes('..')) {
+          errors.push(`config.protected.globs entry ${JSON.stringify(g)} must not contain ".."`);
+        }
+      }
+    }
+    if (cfg.protected.readOnly !== undefined) {
+      if (!Array.isArray(cfg.protected.readOnly)) {
+        errors.push('config.protected.readOnly must be an array');
+      } else {
+        for (const g of cfg.protected.readOnly) {
+          if (typeof g !== 'string' || !g.trim()) {
+            errors.push(`config.protected.readOnly entries must be non-empty strings (got ${JSON.stringify(g)})`);
+          } else if (g.startsWith('!')) {
+            errors.push(`config.protected.readOnly entries must not be negative/exclusion patterns (got ${JSON.stringify(g)})`);
+          } else if (g.includes('\\')) {
+            errors.push(`config.protected.readOnly entry ${JSON.stringify(g)} must use forward slashes`);
+          } else if (g.split('/').includes('..')) {
+            errors.push(`config.protected.readOnly entry ${JSON.stringify(g)} must not contain ".."`);
+          }
+        }
+      }
+    }
+    if (cfg.protected.orchestratorOnly !== undefined) {
+      if (!Array.isArray(cfg.protected.orchestratorOnly)) {
+        errors.push('config.protected.orchestratorOnly must be an array');
+      } else {
+        for (const g of cfg.protected.orchestratorOnly) {
+          if (typeof g !== 'string' || !g.trim()) {
+            errors.push(`config.protected.orchestratorOnly entries must be non-empty strings (got ${JSON.stringify(g)})`);
+          } else if (g.startsWith('!')) {
+            errors.push(`config.protected.orchestratorOnly entries must not be negative/exclusion patterns (got ${JSON.stringify(g)})`);
+          } else if (g.includes('\\')) {
+            errors.push(`config.protected.orchestratorOnly entry ${JSON.stringify(g)} must use forward slashes`);
+          } else if (g.split('/').includes('..')) {
+            errors.push(`config.protected.orchestratorOnly entry ${JSON.stringify(g)} must not contain ".."`);
+          }
+        }
+      }
+    }
+  }
   if (cfg.security && isObj(cfg.security)) {
     if (cfg.security.profiles) {
       if (!isObj(cfg.security.profiles)) {
