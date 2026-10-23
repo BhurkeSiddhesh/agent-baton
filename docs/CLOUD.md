@@ -121,6 +121,7 @@ be installed because the runtime is vendored in `.baton/runtime/`.
 ## Limits to know
 
 - Two copies of the ledger can briefly disagree until `ledger import`/`export`; the union is always authoritative.
+- Simultaneous claims from independent clones are arbitrated deterministically by causal topological order (first valid claim wins). Sibling concurrent claims are recorded as conflicts and losing workers cannot submit; workers can pass `--expected-rev` to enforce compare-and-swap claim confirmation before beginning work.
 - If main moves while a packet is in review, `merge` refuses (fast-forward only). `baton sync` rebases the branch; then
   verify and review again.
 - Cloud agents run with the permissions you give the workflow. The workflow files request only the permissions they

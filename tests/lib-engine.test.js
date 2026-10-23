@@ -5,9 +5,9 @@ import path from 'node:path';
 import {
   STATUSES, TRANSITIONS, load, derive, flags, transition, begin, heartbeat, reclaim, block, submit, verdict, carry, reassignReviewer, handoff,
   setGate, recordVerify, readyPackets, nextFor, blockingDeps, addFinding, resolveFinding, findingsOf, postMessage, scores, progress, auditEvents,
-  acknowledge, readVerifyMarker,
+  acknowledge, readVerifyMarker, confirmClaim,
 } from '../src/lib/engine.js';
-import { appendEvent, readEvents, orderEvents } from '../src/lib/store.js';
+import { appendEvent, readEvents, orderEvents, eventsDir, eventSha, LEDGER_VERSION } from '../src/lib/store.js';
 import { fingerprint } from '../src/lib/util.js';
 import { headCommit } from '../src/lib/git.js';
 import { makeTempRepo, sampleConfig, samplePlan } from './helpers.js';
@@ -501,6 +501,54 @@ test('identical causal event sets derive identical packet state despite delivery
   const b = derive(plan, orderEvents([blocked, begun]));
   assert.deepEqual(a, b);
   assert.equal(a.packets['WP-001'].status, 'IN_PROGRESS');
+});
+
+test('simultaneous conflicting begin claims preserve winning owner, flag conflict and block losing submit', () => {
+  const plan = samplePlan();
+  const win = { id: '20260101T000000Z-000001', ts: '2026-01-01T00:00:00Z', packet: 'WP-001', kind: 'begin', to: 'IN_PROGRESS', by: 'codex', note: '', data: { lease_until: '2026-01-03T00:00:00Z' }, rev: 1, parents: [] };
+  const lose = { id: '20260101T000005Z-000002', ts: '2026-01-01T00:00:05Z', packet: 'WP-001', kind: 'begin', to: 'IN_PROGRESS', by: 'claude', note: '', data: { lease_until: '2026-01-03T00:00:00Z' }, rev: 1, parents: [] };
+  const state = derive(plan, orderEvents([lose, win]));
+  assert.equal(state.packets['WP-001'].by, 'codex');
+  assert.equal(state.packets['WP-001'].claimConflicts.length, 1);
+  assert.equal(state.packets['WP-001'].claimConflicts[0].claimant, 'claude');
+  assert.ok(flags('WP-001', plan, state).includes('CLAIM_CONFLICT:claude'));
+
+  const problems = auditEvents(plan, [win, lose]);
+  assert.ok(problems.some((p) => /conflicting claim on WP-001 by claude; already held by codex/.test(p.problem)));
+});
+
+test('losing clone claimant cannot successfully submit its branch as packet owner', () => {
+  const repo = setup();
+  try {
+    const base = { packet: 'WP-001', kind: 'begin', to: 'IN_PROGRESS', note: '', data: { lease_until: '2026-01-03T00:00:00Z' }, rev: 1, parents: [], hv: LEDGER_VERSION };
+    const win = { ...base, id: '20260101T000000Z-000001', ts: '2026-01-01T00:00:00Z', by: 'codex' };
+    win.sha = eventSha(win);
+    const lose = { ...base, id: '20260101T000005Z-000002', ts: '2026-01-01T00:00:05Z', by: 'claude' };
+    lose.sha = eventSha(lose);
+    const dir = eventsDir(repo.root);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `${win.id}.json`), JSON.stringify(win));
+    fs.writeFileSync(path.join(dir, `${lose.id}.json`), JSON.stringify(lose));
+
+    assert.throws(
+      () => submit(repo.root, 'WP-001', { by: 'claude' }),
+      (e) => e.code === 'HELD' && /claim was won by codex/.test(e.message),
+    );
+  } finally { done(repo); }
+});
+
+test('begin CAS expectedRev rejects stale revisions and confirmClaim exposes arbitration', () => {
+  const repo = setup();
+  try {
+    assert.throws(() => begin(repo.root, 'WP-001', 'codex', { expectedRev: 5 }), (e) => e.code === 'STALE_REVISION');
+    begin(repo.root, 'WP-001', 'codex', { expectedRev: 0 });
+    const confirmed = confirmClaim(repo.root, 'WP-001', 'codex');
+    assert.equal(confirmed.confirmed, true);
+    assert.equal(confirmed.owner, 'codex');
+    const foreign = confirmClaim(repo.root, 'WP-001', 'claude');
+    assert.equal(foreign.confirmed, false);
+    assert.equal(foreign.reason, 'claim lost to codex');
+  } finally { done(repo); }
 });
 
 test('auditEvents flags illegal histories and honours acks', () => {

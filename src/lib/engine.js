@@ -44,7 +44,7 @@ function freshPacketState(p) {
   return {
     id: p.id, status: 'PLANNED', agent: p.agent ?? null, reviewer: p.reviewer ?? null, by: null, contributors: [],
     leaseUntil: null, base: null, commit: null, depCommits: {}, rejections: 0, lastTs: null, merged: null,
-    verdict: null, blockedReason: null,
+    verdict: null, blockedReason: null, claimEventId: null, claimConflicts: [],
   };
 }
 
@@ -76,7 +76,19 @@ export function applyEvent(state, ev) {
   switch (ev.kind) {
     case 'begin':
       add(ev.by);
-      Object.assign(s, { by: ev.by, base: data.base ?? null, leaseUntil: data.lease_until ?? null, commit: null });
+      const isReclaim = ev.note?.startsWith('reclaimed')
+        || (parseTime(s.leaseUntil) && parseTime(ev.ts) && parseTime(ev.ts) > parseTime(s.leaseUntil));
+      if (s.status === 'IN_PROGRESS' && s.by && s.by !== ev.by && !isReclaim) {
+        s.claimConflicts.push({
+          claimant: ev.by,
+          eventId: ev.id,
+          winningClaimant: s.by,
+          winningEventId: s.claimEventId || null,
+          ts: ev.ts,
+        });
+        break;
+      }
+      Object.assign(s, { by: ev.by, base: data.base ?? null, leaseUntil: data.lease_until ?? null, commit: null, claimEventId: ev.id });
       if (data.dep_commits) s.depCommits = { ...data.dep_commits };
       break;
     case 'heartbeat':
@@ -92,7 +104,7 @@ export function applyEvent(state, ev) {
       break;
     case 'handoff':
       s.agent = data.agent ?? s.agent;
-      if (ev.to === 'BLOCKED') { s.by = null; s.leaseUntil = null; }
+      if (ev.to === 'BLOCKED') { s.by = null; s.leaseUntil = null; s.claimEventId = null; }
       break;
     case 'verdict':
       s.verdict = { outcome: ev.to, by: ev.by, score: data.score ?? null, ts: ev.ts };
@@ -178,6 +190,10 @@ export function flags(pid, plan, state, { config = {}, now = utcnow() } = {}) {
   }
   if (s.rejections >= (config.escalateAfterRejections ?? 2) && !DONE.has(s.status)) out.push('ESCALATE');
   if (p.gate && !DONE.has(s.status) && state.gates[p.gate] && !state.gates[p.gate].open) out.push(`GATE_CLOSED:${p.gate}`);
+  if (s.claimConflicts?.length) {
+    const claimants = [...new Set(s.claimConflicts.map((c) => c.claimant))].sort().join(',');
+    out.push(`CLAIM_CONFLICT:${claimants}`);
+  }
   return out;
 }
 
@@ -379,13 +395,21 @@ function requireWorker(config, agent) {
  * Start (or restart) work: lease + snapshot + claim message. IN_PROGRESS is reachable only through here.
  * @returns {{event: object, pulledEarly: boolean, rework: boolean, owns: string[], leaseUntil: string, base: string|null}}
  */
-export function begin(root, pid, agent, { pull = false } = {}) {
+export function begin(root, pid, agent, { pull = false, expectedRev = null } = {}) {
   return withLock(stateDir(root), () => {
     const { config, plan, state } = load(root);
     const p = getPacket(plan, pid);
     checkIdentity(agent);
     requireWorker(config, agent);
     const s = state.packets[pid];
+    const stream = `packet:${pid}`;
+    const streamEvents = readEvents(root).filter((item) => (item.packet ? `packet:${item.packet}` : '') === stream);
+    const currentRev = streamEvents.length ? Math.max(...streamEvents.map((item) => item.rev || 0)) : 0;
+    if (expectedRev != null && currentRev !== expectedRev) {
+      throw new BatonError(`claim CAS conflict for ${pid}: expected revision ${expectedRev} but current revision is ${currentRev}`, {
+        code: 'STALE_REVISION', hint: 're-read the current ledger before claiming',
+      });
+    }
     const pulled = !!s.agent && s.agent !== agent;
     if (pulled && !pull && !s.contributors.includes(agent)) {
       throw new BatonError(`${pid} belongs to ${s.agent}; pass --pull to take it (announce it on the bus)`, { code: 'NOT_YOURS' });
@@ -403,7 +427,7 @@ export function begin(root, pid, agent, { pull = false } = {}) {
     const base = rework && s.base ? s.base : headCommit(root);
     const event = transition(root, pid, 'IN_PROGRESS', {
       by: agent, kind: 'begin', note: pulled ? 'pulled early' : rework ? 'rework' : '',
-      data: { base, lease_until: lease, dep_commits: depCommits },
+      data: { base, lease_until: lease, dep_commits: depCommits, ...(expectedRev != null ? { expected_rev: expectedRev } : {}) },
     });
     clearVerifyMarker(root, pid);
     saveSnapshot(root, pid, agent);
@@ -479,12 +503,39 @@ export function submit(root, pid, { by, note = '' }) {
     const { config, state } = load(root);
     requireActor(config, by, 'agent');
     const s = state.packets[pid];
-    if (s && s.status === 'IN_PROGRESS' && s.by !== by && !RESERVED_AGENTS.includes(by)) throw new BatonError(`${pid} is held by ${s.by}; ${by} cannot submit it`, { code: 'HELD' });
+    if (s && s.status === 'IN_PROGRESS' && s.by !== by && !RESERVED_AGENTS.includes(by)) {
+      const lost = s.claimConflicts?.some((c) => c.claimant === by);
+      throw new BatonError(lost ? `${pid} claim was won by ${s.by}; ${by} cannot submit it` : `${pid} is held by ${s.by}; ${by} cannot submit it`, { code: 'HELD' });
+    }
     const event = transition(root, pid, 'READY_FOR_REVIEW', { by, note });
     const tail = String(event.data.tests || '').split(/\r?\n/).filter(Boolean).pop() || 'n/a';
     appendEvent(root, { packet: pid, kind: 'message', by, data: { type: 'SIGNOFF', to: state.packets[pid].reviewer || 'all', text: `${pid} READY_FOR_REVIEW commit=${event.data.commit || 'n/a'} tests: ${tail}` } });
     return event;
   });
+}
+
+/**
+ * Check whether an agent's claim on a packet is authoritatively confirmed or conflicted.
+ * @returns {{confirmed: boolean, owner: string|null, conflict: boolean, competitors: string[], reason?: string}}
+ */
+export function confirmClaim(root, pid, agent) {
+  const { plan, state } = load(root);
+  getPacket(plan, pid);
+  const s = state.packets[pid];
+  const competitors = s.claimConflicts ? [...new Set(s.claimConflicts.map((c) => c.claimant))] : [];
+  if (s.status !== 'IN_PROGRESS') {
+    return { confirmed: false, owner: s.by, conflict: false, competitors, reason: `${pid} is not IN_PROGRESS (${s.status})` };
+  }
+  if (s.by === agent) {
+    return { confirmed: true, owner: agent, conflict: competitors.length > 0, competitors };
+  }
+  return {
+    confirmed: false,
+    owner: s.by,
+    conflict: true,
+    competitors,
+    reason: `claim lost to ${s.by}`,
+  };
 }
 
 /**
@@ -677,6 +728,11 @@ export function auditEvents(plan, events, config = {}) {
     if (ev.to && ev.to !== s.status) {
       if (!TRANSITIONS[s.status].has(ev.to)) bad(ev, `illegal transition ${ev.packet} ${s.status} -> ${ev.to}`);
       else if (ev.to === 'IN_PROGRESS' && ev.kind !== 'begin') bad(ev, `${ev.packet} entered IN_PROGRESS without "begin"`);
+    }
+    if (ev.kind === 'begin' && s.status === 'IN_PROGRESS' && s.by && s.by !== ev.by) {
+      const isReclaim = ev.note?.startsWith('reclaimed')
+        || (parseTime(s.leaseUntil) && parseTime(ev.ts) && parseTime(ev.ts) > parseTime(s.leaseUntil));
+      if (!isReclaim) bad(ev, `conflicting claim on ${ev.packet} by ${ev.by}; already held by ${s.by}`);
     }
     if (ev.kind === 'verify' && ev.data?.ok) verified[ev.packet] = ev.data.commit ?? null;
     if (ev.kind === 'ready' && (ev.data?.commit ?? null) !== (verified[ev.packet] ?? null)) bad(ev, `${ev.packet} became ready at a commit that was not verified`);

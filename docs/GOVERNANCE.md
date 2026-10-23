@@ -38,6 +38,8 @@ Ledger readers accept checksum-valid legacy events without `hv` as v0 and curren
 
 New ledger writes include per-stream revisions and causal parents. Identical event sets replay in deterministic causal order across clones even with clock skew or out-of-order delivery. Concurrent events for the same stream revision and missing parents are reported as reconciliation errors; operators must resolve the clone divergence before treating the ledger as authoritative.
 
+Simultaneous claims across independent clones are arbitrated deterministically by causal topological order and timestamps (first valid claim wins). Sibling concurrent claims do not overwrite the winning claimant; losing claimants are flagged with `CLAIM_CONFLICT` and rejected from submitting branches as packet holders. Callers can use `--expected-rev` for compare-and-swap claim assertions.
+
 ## Deprecation and migration
 
 1. Create a tracked issue describing the motivation, old behavior and migration/rollback path. Mark security changes separately.

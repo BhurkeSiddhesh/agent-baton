@@ -6,6 +6,8 @@ All notable changes to Agent Baton are documented here. The format follows
 
 ## [Unreleased]
 
+- Simultaneous claims across independent clones are arbitrated deterministically by first valid causal claim; losing claimants are flagged with `CLAIM_CONFLICT` and cannot submit branches as packet holders, with CAS `--expected-rev` and `confirmClaim` available for workers.
+
 - New ledger writes record per-stream revisions and causal parents; replay is deterministic across clones, while concurrent sibling revisions and missing parents are reported as reconciliation errors.
 
 - Ledger events now use enforced versioned schemas at append, read, verification and import boundaries; malformed and future-version events are excluded from replay while legacy pre-version events remain readable.
