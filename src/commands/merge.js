@@ -1,6 +1,6 @@
 import { BatonError, UsageError } from '../lib/errors.js';
 import { load, postMessage, checkIdentity } from '../lib/engine.js';
-import { appendEvent } from '../lib/store.js';
+import { appendEvent, assertSensitiveReplay } from '../lib/store.js';
 import { git, gitOk, gitOut, isGit, mainRef, listWorktrees } from '../lib/git.js';
 
 export const name = 'merge';
@@ -20,6 +20,7 @@ export async function run(ctx, args) {
   const root = ctx.root;
   const by = ctx.agent(args.by || args.agent);
   const { config, plan, state } = load(root);
+  assertSensitiveReplay(root, { packet: pid, action: 'merge', config });
   checkIdentity(by);
   if (by !== config.orchestrator && by !== 'human') throw new BatonError(`only the orchestrator (${config.orchestrator}) or human may merge; got ${by}`, { code: 'NOT_ORCHESTRATOR' });
   if (!plan.packets.some((p) => p.id === pid)) throw new BatonError(`unknown packet ${pid}`, { code: 'UNKNOWN_PACKET' });

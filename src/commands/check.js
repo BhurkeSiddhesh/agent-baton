@@ -1,6 +1,6 @@
 import { loadConfig } from '../lib/config.js';
 import { loadPlan, validatePlan } from '../lib/plan.js';
-import { readEvents, verifyLedger } from '../lib/store.js';
+import { readEvents, verifyLedger, verifyEventAttestation } from '../lib/store.js';
 import { derive, auditEvents, flags, DONE } from '../lib/engine.js';
 import { isProtected } from '../lib/glob.js';
 import { packetsOverlap } from '../lib/plan.js';
@@ -44,6 +44,21 @@ export async function run(ctx, args) {
     };
     sink(verifyLedger(ctx.root), 'ledger');
     sink(auditEvents(plan, events, config), 'ledger');
+    if (config.security?.requireAttestation || config.security?.requireSignatures) {
+      const keys = config.security.keys || {};
+      for (const ev of events) {
+        if (['verdict', 'verify', 'merged'].includes(ev.kind)) {
+          if (!ev.sig) {
+            err('attestation', `${ev.id} (${ev.kind}): missing required cryptographic attestation`);
+          } else if (!keys[ev.sig.key]) {
+            err('attestation', `${ev.id} (${ev.kind}): unknown public key "${ev.sig.key}"`);
+          } else {
+            const v = verifyEventAttestation(ev, keys[ev.sig.key]);
+            if (!v.valid) err('attestation', `${ev.id} (${ev.kind}): invalid signature: ${v.reason}`);
+          }
+        }
+      }
+    }
     for (const p of plan.packets) {
       const f = flags(p.id, plan, state, { config, now });
       if (f.includes('STALE')) warn('lease', `${p.id}: lease expired (held by ${state.packets[p.id].by || '-'}, until ${state.packets[p.id].leaseUntil})`);

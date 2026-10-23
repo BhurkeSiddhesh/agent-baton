@@ -6,8 +6,10 @@ import { commonDir } from './git.js';
 import { withLock } from './lock.js';
 import { utcnow, stamp, sha256, canonicalJson, ensureDir, writeFileAtomic, readJson } from './util.js';
 import { LEDGER_VERSION, EVENT_KINDS, EVENT_ID_RE, validateEventSchema } from './event-schema.js';
+import { verifyEventAttestation } from './attestation.js';
 
 export { LEDGER_VERSION, EVENT_KINDS, EVENT_ID_RE, validateEventSchema } from './event-schema.js';
+export { createEventAttestation, verifyEventAttestation, signEvent } from './attestation.js';
 
 /**
  * Local shared store: `<git common dir>/baton` inside git (shared by all worktrees), else `<root>/.baton/state`.
@@ -65,9 +67,9 @@ function readEventFile(file) {
   }
 }
 
-/** sha256 of the canonical JSON of the event without its `sha` field. */
+/** sha256 of the canonical JSON of the event without its `sha` and `sig` fields. */
 export function eventSha(ev) {
-  const { sha, ...rest } = ev;
+  const { sha, sig, ...rest } = ev;
   return sha256(canonicalJson(rest));
 }
 
@@ -269,6 +271,62 @@ export function verifyLedger(root) {
   }
   for (const p of problems) p.acked = acked.has(p.id);
   return problems.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+/**
+ * Asserts that the ledger has no unacknowledged integrity problems before performing
+ * a sensitive operation (such as merging an accepted packet into main, or transitioning
+ * to an accepted/ready state). Throws BatonError with code LEDGER_INTEGRITY_COMPROMISED
+ * and a concrete remediation report if tampered or corrupt events are detected.
+ *
+ * @param {string} root
+ * @param {{packet?: string, action?: string, config?: object}} [options]
+ */
+export function assertSensitiveReplay(root, { packet, action = 'sensitive operation', config } = {}) {
+  const problems = verifyLedger(root);
+  const unackedErrors = problems.filter((p) => p.severity === 'error' && !p.acked);
+  if (unackedErrors.length > 0) {
+    const report = unackedErrors.map((p) => `  - [${p.where}] ${p.id}: ${p.problem}`).join('\n');
+    throw new BatonError(
+      `ledger integrity check failed before ${action}${packet ? ` for ${packet}` : ''}: tampered, corrupted or conflicting events detected\n${report}`,
+      {
+        code: 'LEDGER_INTEGRITY_COMPROMISED',
+        hint: 'run "baton ledger verify" to inspect anomalies; use "baton ledger export" or "baton ledger reconcile" to align state, or acknowledge verified historical anomalies with an ack event',
+        details: unackedErrors,
+      }
+    );
+  }
+
+  // Optional cryptographic attestation check if enabled in config
+  if (config?.security?.requireAttestation || config?.security?.requireSignatures) {
+    const keys = config.security.keys || {};
+    const events = readEvents(root);
+    const targetEvents = packet ? events.filter((e) => e.packet === packet) : events;
+    for (const ev of targetEvents) {
+      if (['verdict', 'verify', 'merged'].includes(ev.kind)) {
+        if (!ev.sig) {
+          throw new BatonError(`event ${ev.id} (${ev.kind}) lacks required cryptographic attestation`, {
+            code: 'ATTESTATION_MISSING',
+            hint: 'security.requireAttestation is enabled; sensitive events must carry a valid signature',
+          });
+        }
+        const pubKey = keys[ev.sig.key];
+        if (!pubKey) {
+          throw new BatonError(`unknown public key "${ev.sig.key}" for event ${ev.id}`, {
+            code: 'ATTESTATION_KEY_UNKNOWN',
+          });
+        }
+        const v = verifyEventAttestation(ev, pubKey);
+        if (!v.valid) {
+          throw new BatonError(`invalid cryptographic attestation on event ${ev.id}: ${v.reason}`, {
+            code: 'ATTESTATION_INVALID',
+          });
+        }
+      }
+    }
+  }
+
+  return { ok: true };
 }
 
 /**
