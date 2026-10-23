@@ -11,11 +11,14 @@ Include the version (`baton version`), your OS and Node version, what you did, w
 You will get an acknowledgement within a few days. Fixes are released as patch versions and credited in
 [CHANGELOG.md](CHANGELOG.md) unless you prefer otherwise.
 
-## Supported versions
+## Supported versions and release ownership
 
-See [governance and compatibility policy](docs/GOVERNANCE.md) for the security fix approval, hotfix exception, schema migration and release responsibilities. Private vulnerability reports should not be duplicated into public issue descriptions.
+See the [governance and compatibility policy](docs/GOVERNANCE.md) for security fix approval, hotfix exception, schema migration, and release responsibilities. Private vulnerability reports must never be duplicated into public issues.
 
-Only the latest released version receives security fixes while the project is below 1.0.
+- **Pre-1.0 security support:** Only the latest released minor/patch version receives security fixes while the project is in the `0.1.x` series.
+- **Release ownership:** The project maintainer ([BhurkeSiddhesh](https://github.com/BhurkeSiddhesh)) retains exclusive release ownership for security advisories and patch releases. Coding agents and automated runners cannot authorize or publish security releases.
+- **Response timeline:** The maintainer acknowledges vulnerability reports within 48 to 72 hours, assesses severity, and collaborates with the reporter within a private GitHub Security Advisory.
+- **Emergency hotfixes:** In cases where an emergency hotfix must bypass ordinary review cadences, maintainers must record the affected commit SHA, severity classification, approving maintainer, temporary mitigations, rollback instructions, and follow-up audit on a tracked issue or PR without disclosing exploit mechanics.
 
 ## Threat model and design
 
