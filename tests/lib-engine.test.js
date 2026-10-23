@@ -551,6 +551,43 @@ test('begin CAS expectedRev rejects stale revisions and confirmClaim exposes arb
   } finally { done(repo); }
 });
 
+test('fencing tokens increment across begin and reclaim, binding verify to active lease token', () => {
+  const repo = setup({ git: true });
+  try {
+    const b1 = begin(repo.root, 'WP-001', 'codex');
+    assert.equal(b1.leaseToken, 1);
+    const v1 = recordVerify(repo.root, 'WP-001', { ok: true, mode: 'git-branch', commit: headCommit(repo.root) });
+    assert.equal(v1.data.lease_token, 1);
+    const m1 = readVerifyMarker(repo.root, 'WP-001');
+    assert.equal(m1.lease_token, 1);
+
+    // Now artificially expire the lease and reclaim by another worker
+    process.env.BATON_NOW = '2026-10-14T00:00:00Z';
+    const rec = reclaim(repo.root, 'WP-001', 'gemini');
+    assert.equal(rec.leaseToken, 2);
+
+    // Old worker attempts submit under stale lease token 1
+    assert.throws(
+      () => submit(repo.root, 'WP-001', { by: 'codex' }),
+      (e) => e.code === 'HELD',
+    );
+
+    // Replay of heartbeat from old generation 1 does not revive the lease
+    const plan = samplePlan();
+    const state = derive(plan, [
+      { id: '20260101T000000Z-000001', ts: '2026-01-01T00:00:00Z', packet: 'WP-001', kind: 'begin', to: 'IN_PROGRESS', by: 'codex', note: '', data: { lease_until: '2026-01-01T08:00:00Z', lease_token: 1 }, rev: 1, parents: [] },
+      { id: '20260101T090000Z-000002', ts: '2026-01-01T09:00:00Z', packet: 'WP-001', kind: 'begin', to: 'IN_PROGRESS', by: 'gemini', note: 'reclaimed', data: { lease_until: '2026-01-01T17:00:00Z', lease_token: 2 }, rev: 2, parents: ['20260101T000000Z-000001'] },
+      { id: '20260101T093000Z-000003', ts: '2026-01-01T09:30:00Z', packet: 'WP-001', kind: 'heartbeat', by: 'codex', note: '', data: { lease_until: '2026-01-02T00:00:00Z', lease_token: 1 }, rev: 3, parents: ['20260101T090000Z-000002'] },
+    ]);
+    assert.equal(state.packets['WP-001'].by, 'gemini');
+    assert.equal(state.packets['WP-001'].leaseUntil, '2026-01-01T17:00:00Z');
+    assert.equal(state.packets['WP-001'].leaseToken, 2);
+  } finally {
+    delete process.env.BATON_NOW;
+    done(repo);
+  }
+});
+
 test('auditEvents flags illegal histories and honours acks', () => {
   const repo = setup();
   try {

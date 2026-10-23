@@ -44,7 +44,7 @@ function freshPacketState(p) {
   return {
     id: p.id, status: 'PLANNED', agent: p.agent ?? null, reviewer: p.reviewer ?? null, by: null, contributors: [],
     leaseUntil: null, base: null, commit: null, depCommits: {}, rejections: 0, lastTs: null, merged: null,
-    verdict: null, blockedReason: null, claimEventId: null, claimConflicts: [],
+    verdict: null, blockedReason: null, claimEventId: null, claimConflicts: [], leaseToken: 0,
   };
 }
 
@@ -88,10 +88,14 @@ export function applyEvent(state, ev) {
         });
         break;
       }
-      Object.assign(s, { by: ev.by, base: data.base ?? null, leaseUntil: data.lease_until ?? null, commit: null, claimEventId: ev.id });
+      s.leaseToken = data.lease_token != null ? data.lease_token : ((s.leaseToken || 0) + 1);
+      Object.assign(s, { by: ev.by, base: data.base ?? null, leaseUntil: data.lease_until ?? null, commit: null, claimEventId: ev.id, leaseToken: s.leaseToken });
       if (data.dep_commits) s.depCommits = { ...data.dep_commits };
       break;
     case 'heartbeat':
+      if (data.lease_token != null && s.leaseToken && data.lease_token !== s.leaseToken) {
+        break;
+      }
       add(ev.by);
       s.leaseUntil = data.lease_until ?? null;
       s.by = s.by || ev.by;
@@ -104,6 +108,7 @@ export function applyEvent(state, ev) {
       break;
     case 'handoff':
       s.agent = data.agent ?? s.agent;
+      s.leaseToken = (s.leaseToken || 0) + 1;
       if (ev.to === 'BLOCKED') { s.by = null; s.leaseUntil = null; s.claimEventId = null; }
       break;
     case 'verdict':
@@ -290,10 +295,12 @@ function clearVerifyMarker(root, pid) {
  */
 export function recordVerify(root, pid, result) {
   return withLock(stateDir(root), () => {
-    const { plan } = load(root);
+    const { plan, state } = load(root);
     getPacket(plan, pid);
-    writeJsonAtomic(verifyMarkerPath(root, pid), result);
-    return appendEvent(root, { packet: pid, kind: 'verify', by: 'harness', data: { ok: !!result.ok, commit: result.commit ?? null, mode: result.mode ?? null } });
+    const leaseToken = state.packets[pid]?.leaseToken || 0;
+    const marker = { ...result, lease_token: leaseToken };
+    writeJsonAtomic(verifyMarkerPath(root, pid), marker);
+    return appendEvent(root, { packet: pid, kind: 'verify', by: 'harness', data: { ok: !!result.ok, commit: result.commit ?? null, mode: result.mode ?? null, lease_token: leaseToken } });
   });
 }
 
@@ -366,6 +373,9 @@ export function transition(root, pid, to, { by = null, note = '', kind = 'status
     if (to === 'READY_FOR_REVIEW') {
       const marker = readVerifyMarker(root, pid) || {};
       if (!marker.ok) throw new BatonError(`${pid}: run "baton verify ${pid}" successfully before requesting review`, { code: 'NOT_VERIFIED' });
+      if (marker.lease_token != null && s.leaseToken && marker.lease_token !== s.leaseToken) {
+        throw new BatonError(`${pid}: verified under lease token ${marker.lease_token} but current lease token is ${s.leaseToken}; verify again`, { code: 'STALE_LEASE_TOKEN' });
+      }
       if (String(marker.mode || '').startsWith('git-branch')) {
         if (isDirty(root, { exclude: BUILTIN_COORDINATION })) throw new BatonError(`${pid}: commit your work first so the reviewer sees an exact artifact`, { code: 'DIRTY_TREE' });
         if (marker.commit !== headCommit(root)) throw new BatonError(`${pid}: HEAD moved since verify; run verify again`, { code: 'STALE_VERIFY' });
@@ -422,12 +432,13 @@ export function begin(root, pid, agent, { pull = false, expectedRev = null } = {
       throw new BatonError(`${pid} is under review; only its contributors (${s.contributors.join(', ')}) may rework it`, { code: 'NOT_CONTRIBUTOR' });
     }
     const lease = leaseUntil(config);
+    const nextToken = (s.leaseToken || 0) + 1;
     const depCommits = {};
     for (const d of p.deps) if (state.packets[d]) depCommits[d] = state.packets[d].commit || 'unbuilt';
     const base = rework && s.base ? s.base : headCommit(root);
     const event = transition(root, pid, 'IN_PROGRESS', {
       by: agent, kind: 'begin', note: pulled ? 'pulled early' : rework ? 'rework' : '',
-      data: { base, lease_until: lease, dep_commits: depCommits, ...(expectedRev != null ? { expected_rev: expectedRev } : {}) },
+      data: { base, lease_until: lease, lease_token: nextToken, dep_commits: depCommits, ...(expectedRev != null ? { expected_rev: expectedRev } : {}) },
     });
     clearVerifyMarker(root, pid);
     saveSnapshot(root, pid, agent);
@@ -435,7 +446,7 @@ export function begin(root, pid, agent, { pull = false, expectedRev = null } = {
       packet: pid, kind: 'message', by: agent,
       data: { type: 'CLAIM', to: 'all', text: `${pid} ${p.title}. Owns: ${p.owns.join(', ')}. Lease until ${lease}${pulled ? ' (pulled early)' : ''}${rework ? ' (rework)' : ''}` },
     });
-    return { event, pulledEarly: pulled, rework, owns: p.owns, leaseUntil: lease, base };
+    return { event, pulledEarly: pulled, rework, owns: p.owns, leaseUntil: lease, leaseToken: nextToken, base };
   });
 }
 
@@ -455,7 +466,8 @@ export function heartbeat(root, pid, agent) {
     }
     if (agent === s.reviewer) throw new BatonError(`${agent} is the reviewer of ${pid} and cannot work on it`, { code: 'REVIEWER_CONFLICT' });
     const lease = leaseUntil(config);
-    appendEvent(root, { packet: pid, kind: 'heartbeat', by: agent, data: { lease_until: lease } });
+    const leaseToken = s.leaseToken || 1;
+    appendEvent(root, { packet: pid, kind: 'heartbeat', by: agent, data: { lease_until: lease, lease_token: leaseToken } });
     return lease;
   });
 }
@@ -472,12 +484,14 @@ export function reclaim(root, pid, agent) {
     if (!f.includes('STALE') && !f.includes('NO_LEASE')) throw new BatonError(`${pid} is not stale (lease until ${s.leaseUntil})`, { code: 'NOT_STALE', hint: `wait for the lease to expire, or ask ${s.by} to hand it off` });
     if (agent === s.reviewer) throw new BatonError(`${agent} is the reviewer of ${pid} and cannot work on it`, { code: 'REVIEWER_CONFLICT' });
     const lease = leaseUntil(config);
+    const oldToken = s.leaseToken || 1;
+    const nextToken = oldToken + 1;
     const event = appendEvent(root, {
       packet: pid, kind: 'begin', to: 'IN_PROGRESS', by: agent, note: `reclaimed from ${s.by}`,
-      data: { base: s.base, lease_until: lease, dep_commits: s.depCommits },
+      data: { base: s.base, lease_until: lease, lease_token: nextToken, dep_commits: s.depCommits },
     });
-    appendEvent(root, { packet: pid, kind: 'message', by: agent, data: { type: 'NOTICE', to: 'all', text: `${pid} reclaimed from ${s.by} (stale lease)` } });
-    return { event, leaseUntil: lease };
+    appendEvent(root, { packet: pid, kind: 'message', by: agent, data: { type: 'NOTICE', to: 'all', text: `${pid} reclaimed from ${s.by} (revoking lease token ${oldToken}; new token ${nextToken})` } });
+    return { event, leaseUntil: lease, leaseToken: nextToken };
   });
 }
 
