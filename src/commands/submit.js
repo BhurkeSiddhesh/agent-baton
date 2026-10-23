@@ -17,7 +17,7 @@ export async function run(ctx, args) {
   if (!pid) throw new UsageError(`missing packet id. Usage: ${usage}`);
   const by = ctx.agent(args.agent);
   const opId = args['op-id'] || null;
-  const ev = submit(ctx.root, pid, { by, note: args.note || '', opId });
+  const ev = submit(ctx.root, pid, { by, note: args.note || '', opId, env: ctx.env });
   // The engine posts the SIGNOFF; the claim is over now, so release it explicitly on the bus.
   const { plan } = ctx.loadState();
   const owns = plan.packets.find((p) => p.id === pid)?.owns || [];

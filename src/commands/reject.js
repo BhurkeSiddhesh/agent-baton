@@ -20,7 +20,7 @@ export async function run(ctx, args) {
   const by = ctx.agent(args.by || args.agent);
   const score = args.score === undefined ? null : args.score;
   const opId = args['op-id'] || null;
-  verdict(ctx.root, pid, 'REJECTED', { by, note: args.note || '', score, opId });
+  verdict(ctx.root, pid, 'REJECTED', { by, note: args.note || '', score, opId, env: ctx.env });
   if (args.json) ctx.json({ packet: pid, by, status: 'REJECTED', note: args.note || '', score });
   else ctx.out(`${pid} -> REJECTED by ${by}`);
   return 0;
