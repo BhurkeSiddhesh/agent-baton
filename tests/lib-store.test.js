@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
-import { appendEvent, readEvents, verifyLedger, importLedger, exportLedger, stateDir, eventsDir, ledgerDir, eventSha, EVENT_ID_RE, LEDGER_VERSION } from '../src/lib/store.js';
+import { appendEvent, readEvents, verifyLedger, importLedger, exportLedger, stateDir, eventsDir, ledgerDir, eventSha, EVENT_ID_RE, LEDGER_VERSION, EVENT_KINDS, validateEventSchema } from '../src/lib/store.js';
 import { makeTempRepo, REPO } from './helpers.js';
 
 const app = (root, over = {}) => appendEvent(root, { packet: 'WP-001', kind: 'status', to: 'BLOCKED', by: 'codex', ...over });
@@ -149,6 +149,59 @@ test('a ledger from a newer format refuses writes', () => {
     future.sha = eventSha(future);
     fs.writeFileSync(path.join(ledgerDir(repo.root), `${future.id}.json`), JSON.stringify(future));
     assert.throws(() => app(repo.root), (e) => e.code === 'LEDGER_NEWER');
+  } finally { repo.cleanup(); }
+});
+
+test('event schemas reject malformed appends and quarantine malformed or future replay', () => {
+  const repo = makeTempRepo({ config: true });
+  try {
+    assert.throws(() => appendEvent(repo.root, { packet: 'WP-001', kind: 'message', by: 'codex', data: { type: 'NOTICE', to: 'all' } }), (e) => e.code === 'BAD_EVENT_SCHEMA' && /text/.test(e.message));
+    const good = app(repo.root);
+    const malformed = { ...good, id: '20260101T000000Z-111111', data: [], hv: LEDGER_VERSION };
+    malformed.sha = eventSha(malformed);
+    fs.writeFileSync(path.join(ledgerDir(repo.root), `${malformed.id}.json`), JSON.stringify(malformed));
+    const future = { ...good, id: '20260101T000000Z-222222', hv: LEDGER_VERSION + 1 };
+    future.sha = eventSha(future);
+    fs.writeFileSync(path.join(ledgerDir(repo.root), `${future.id}.json`), JSON.stringify(future));
+    fs.writeFileSync(path.join(ledgerDir(repo.root), '20260101T000000Z-444444.json'), 'null');
+    assert.deepEqual(readEvents(repo.root).map((e) => e.id), [good.id]);
+    const problems = verifyLedger(repo.root);
+    assert.ok(problems.some((p) => p.id === malformed.id && /data must be an object/.test(p.problem)));
+    assert.ok(problems.some((p) => p.id === future.id && /newer than supported/.test(p.problem)));
+    assert.ok(problems.some((p) => p.id === '20260101T000000Z-444444' && /JSON object/.test(p.problem)));
+  } finally { repo.cleanup(); }
+});
+
+test('every declared event kind has a valid v1 schema fixture', () => {
+  const data = {
+    begin: { base: null, lease_until: '2026-01-01T01:00:00Z', dep_commits: {} }, heartbeat: { lease_until: '2026-01-01T01:00:00Z' },
+    reclaim: {}, status: {}, ready: { commit: null, tests: '' }, verdict: { commit: null }, reviewer: { reviewer: 'claude' },
+    handoff: { agent: 'claude', from: 'codex' }, verify: { ok: true, commit: null, mode: 'snapshot' }, merged: { commit: 'abc' },
+    finding: { fid: 'AUD-001', severity: 'MAJOR' }, finding_resolved: { fid: 'AUD-001', resolution: 'fixed', confirm: false },
+    message: { type: 'NOTICE', to: 'all', text: 'hello' }, gate: { gate: 'G1', open: true }, plan: { hash: 'abc' },
+    init: { version: '0.1.0', agents: ['codex'] }, ack: { event: '20260101T000000Z-abcdef' },
+  };
+  const transitions = new Set(['begin', 'reclaim', 'status', 'ready', 'verdict']);
+  const nonPacket = new Set(['message', 'gate', 'plan', 'init', 'ack']);
+  for (const kind of EVENT_KINDS) {
+    const ev = {
+      id: '20260101T000000Z-000001', ts: '2026-01-01T00:00:00Z', packet: nonPacket.has(kind) ? null : 'WP-001',
+      kind, to: transitions.has(kind) ? 'BLOCKED' : null, by: 'codex', note: '', data: data[kind], hv: LEDGER_VERSION, sha: '0'.repeat(64),
+    };
+    assert.deepEqual(validateEventSchema(ev, { allowLegacy: false }), [], kind);
+  }
+});
+
+test('schema v0 remains readable but new appends require current schema', () => {
+  const repo = makeTempRepo({ config: true });
+  try {
+    const current = app(repo.root);
+    const legacy = { ...current, id: '20260101T000000Z-333333' };
+    delete legacy.hv;
+    legacy.sha = eventSha(legacy);
+    fs.writeFileSync(path.join(ledgerDir(repo.root), `${legacy.id}.json`), JSON.stringify(legacy));
+    assert.deepEqual(validateEventSchema(legacy), []);
+    assert.ok(readEvents(repo.root).some((e) => e.id === legacy.id));
   } finally { repo.cleanup(); }
 });
 

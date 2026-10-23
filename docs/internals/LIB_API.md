@@ -143,18 +143,18 @@ means "everything under this directory" (`dir/` is sugar for `dir/**`), everythi
 - `stateDir(root)`: `<git common dir>/baton/` in git, else `<root>/.baton/state/` (created on demand). `stateSub(root, 'verified'|'snapshots'|...)`,
   `eventsDir(root)`, `ledgerDir(root)` (= `<root>/.baton/ledger`).
 - `appendEvent(root, {packet?, kind, to?, by?, note?, data?}) -> event`: under the state lock; fills `id` (`YYYYMMDDTHHMMSSZ-<6 hex>`, strictly increasing even inside one
-  second), `ts`, `hv`, `sha`; writes the local file and, unless `config.ledger.mirror === false`, `.baton/ledger/<id>.json`. **No rule checks**: use the engine functions
-  for anything that changes packet state. Throws `BAD_EVENT` (unknown kind) or `LEDGER_NEWER` (an event with a newer `hv` exists).
-- `readEvents(root) -> event[]`: union of local and mirror, de-duplicated by id (local wins), sorted by `(ts, id)`; unreadable files skipped.
+  second), `ts`, `hv`, `sha`; validates the versioned event shape and writes the local file plus the optional mirror. Shape validation does not authorize lifecycle transitions: use engine functions for state changes. Throws `BAD_EVENT`, `BAD_EVENT_SCHEMA`, or `LEDGER_NEWER`.
+- `readEvents(root) -> event[]`: union of local and mirror, de-duplicated by id (local wins), sorted by `(ts, id)`; unreadable, checksum-invalid, schema-invalid and future-version events are quarantined from replay and reported by `verifyLedger`.
 - `verifyLedger(root) -> [{id, where: 'local'|'mirror'|'both', severity: 'error'|'warn', problem, acked}]`: unreadable JSON, id/file mismatch, missing/wrong `sha`, local and
   mirror copies that differ (errors); a local event missing from the mirror (warn). `acked` is true when an `ack` event names the id. Empty array = healthy.
 - `importLedger(root, fromDir = ledgerDir(root)) -> {imported: ids[], skipped: [{id, reason}]}` and `exportLedger(root) -> {exported: ids[], skipped}`: copy only valid (sha-checked) events.
-- `eventSha(event)`, `EVENT_KINDS`, `EVENT_ID_RE`, `LEDGER_VERSION` (= 1).
+- `eventSha(event)`, `validateEventSchema(event)`, `EVENT_KINDS`, `EVENT_ID_RE`, `LEDGER_VERSION` (= 1). Historical events without `hv` are treated as legacy v0 and remain readable; writers always emit v1. Unknown future versions are never replayed or imported. Migration creates new events and never silently rewrites checksum-bound history.
 
 Event kinds: `begin, heartbeat, reclaim, status, ready, verdict, reviewer, handoff, verify, merged, finding, finding_resolved, message, gate, plan, init, ack`.
 `message.data = {type, to, text}`; `gate.data = {gate, open}`; `finding.data = {fid, severity, file, line, evidence, fix, against}` with the text in `note`;
 `finding_resolved.data = {fid, resolution, confirm}`; `begin.data = {base, lease_until, dep_commits}`; `ready.data = {commit, tests}`; `verify.data = {ok, commit, mode}`;
 `verdict.data = {commit, score?}`; `handoff.data = {agent, from}`; `ack.data = {event}`; `plan.data = {hash}` (written by plan commands via `appendEvent`).
+All kinds require string `by`; packet kinds require string `packet`; transition kinds (`begin`, `reclaim`, `status`, `ready`, `verdict`) require string `to`. A `handoff` only requires `to` when it also releases in-progress work. Required payload fields are: `heartbeat.lease_until`, `reviewer.reviewer`, `handoff.agent`, `verify.ok`, `merged.commit`, `finding.{fid,severity}`, `finding_resolved.{fid,resolution}`, `message.{type,to,text}`, `gate.{gate,open}`, `plan.hash`, and `ack.event`. Other listed payload fields are optional for v0/v1 compatibility. `status` has no kind-specific payload. Unknown payload fields are retained for additive compatibility; a future incompatible contract must increment `hv`.
 
 ## 10. `snapshot.js` (non-git scope tracking)
 

@@ -5,11 +5,9 @@ import { BatonError } from './errors.js';
 import { commonDir } from './git.js';
 import { withLock } from './lock.js';
 import { utcnow, stamp, sha256, canonicalJson, ensureDir, writeFileAtomic, readJson } from './util.js';
+import { LEDGER_VERSION, EVENT_KINDS, EVENT_ID_RE, validateEventSchema } from './event-schema.js';
 
-export const LEDGER_VERSION = 1;
-export const EVENT_KINDS = ['begin', 'heartbeat', 'reclaim', 'status', 'ready', 'verdict', 'reviewer', 'handoff', 'verify', 'merged',
-  'finding', 'finding_resolved', 'message', 'gate', 'plan', 'init', 'ack'];
-export const EVENT_ID_RE = /^\d{8}T\d{6}Z-[0-9a-f]{6}$/;
+export { LEDGER_VERSION, EVENT_KINDS, EVENT_ID_RE, validateEventSchema } from './event-schema.js';
 
 /**
  * Local shared store: `<git common dir>/baton` inside git (shared by all worktrees), else `<root>/.baton/state`.
@@ -85,7 +83,7 @@ export function readEvents(root) {
     for (const id of listIds(dir)) {
       if (byId.has(id)) continue;
       const ev = readEventCached(path.join(dir, `${id}.json`));
-      if (ev && typeof ev === 'object' && ev.id === id) byId.set(id, ev);
+      if (ev && ev.id === id && validateEventSchema(ev).length === 0 && eventSha(ev) === ev.sha) byId.set(id, ev);
     }
   }
   return [...byId.values()].sort(cmp);
@@ -143,6 +141,8 @@ export function appendEvent(root, partial) {
       hv: LEDGER_VERSION,
     };
     ev.sha = eventSha(ev);
+    const schemaProblems = validateEventSchema(ev, { allowLegacy: false });
+    if (schemaProblems.length) throw new BatonError(`invalid ${ev.kind} event: ${schemaProblems.join('; ')}`, { code: 'BAD_EVENT_SCHEMA' });
     const text = JSON.stringify(ev, null, 2) + '\n';
     writeFileAtomic(path.join(eventsDir(root), `${ev.id}.json`), text);
     if (mirrorEnabled(root)) writeFileAtomic(path.join(ledgerDir(root), `${ev.id}.json`), text);
@@ -163,10 +163,13 @@ export function verifyLedger(root) {
     for (const id of listIds(dir)) {
       const { ev, error } = readEventFile(path.join(dir, `${id}.json`));
       if (error) { add(id, where, 'error', `unreadable JSON (${error})`); continue; }
+      if (!ev || typeof ev !== 'object' || Array.isArray(ev)) { add(id, where, 'error', 'event must be a JSON object'); continue; }
       if (ev.id !== id) { add(id, where, 'error', `file name does not match event id ${ev.id}`); continue; }
       if (!EVENT_ID_RE.test(id)) add(id, where, 'warn', 'event id has an unexpected format');
       if (!ev.sha) { add(id, where, 'error', 'event has no sha'); continue; }
       if (eventSha(ev) !== ev.sha) { add(id, where, 'error', 'sha mismatch: the event was edited after it was written'); continue; }
+      const schemaProblems = validateEventSchema(ev);
+      if (schemaProblems.length) { add(id, where, 'error', `invalid event schema: ${schemaProblems.join('; ')}`); continue; }
       const slot = valid.get(id) || {};
       slot[where] = ev;
       valid.set(id, slot);
@@ -194,7 +197,10 @@ function copyValid(fromDir, toDir) {
     if (have.has(id)) continue;
     const file = path.join(fromDir, `${id}.json`);
     const { ev, error } = readEventFile(file);
-    if (error || ev.id !== id || !ev.sha || eventSha(ev) !== ev.sha) { skipped.push({ id, reason: error ? 'unreadable' : 'failed sha check' }); continue; }
+    const schemaProblems = ev ? validateEventSchema(ev) : [];
+    if (error || !ev || typeof ev !== 'object' || Array.isArray(ev) || ev.id !== id || !ev.sha || eventSha(ev) !== ev.sha || schemaProblems.length) {
+      skipped.push({ id, reason: error ? 'unreadable' : schemaProblems.length ? `invalid schema: ${schemaProblems.join('; ')}` : 'failed sha check' }); continue;
+    }
     writeFileAtomic(path.join(toDir, `${id}.json`), fs.readFileSync(file, 'utf8'));
     copied.push(id);
   }
