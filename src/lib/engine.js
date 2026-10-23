@@ -396,8 +396,8 @@ export function transition(root, pid, to, { by = null, note = '', kind = 'status
     let evData = { ...data };
     if (REVIEW_OUTCOMES.has(to)) {
       if (!s.reviewer) throw new BatonError(`${pid}: no reviewer assigned`, { code: 'NO_REVIEWER' });
-      if (by !== s.reviewer) throw new BatonError(`${pid}: only the assigned reviewer (${s.reviewer}) may record a verdict; got --by ${by}`, { code: 'NOT_REVIEWER' });
-      if (config.requireDifferentReviewer !== false && (s.contributors.includes(by) || by === s.agent)) {
+      if (by !== s.reviewer && by !== 'human') throw new BatonError(`${pid}: only the assigned reviewer (${s.reviewer}) or human may record a verdict; got --by ${by}`, { code: 'NOT_REVIEWER' });
+      if (config.requireDifferentReviewer !== false && by !== 'human' && (s.contributors.includes(by) || by === s.agent)) {
         throw new BatonError(`${pid}: the reviewer worked on this packet; use "baton reassign"`, { code: 'REVIEWER_CONFLICT' });
       }
       const open = findingsOf(readEvents(root), pid).filter((f) => f.status !== 'closed');
@@ -435,7 +435,7 @@ export function transition(root, pid, to, { by = null, note = '', kind = 'status
       evData = { ...evData, commit: marker.commit ?? null, tests: marker.tests?.tail ?? '' };
     }
     if (old === 'READY_FOR_REVIEW' && to === 'IN_PROGRESS') clearVerifyMarker(root, pid);
-    return appendEvent(root, { packet: pid, kind: evKind, to, by, note, data: evData, ...(opId ? { op_id: opId } : {}) });
+    return appendEvent(root, { packet: pid, kind: evKind, to, by, note, data: evData, env, ...(opId ? { op_id: opId } : {}) });
   });
 }
 
@@ -761,7 +761,7 @@ export function confirmClaim(root, pid, agent) {
  * Record a review verdict: outcome ACCEPTED | ACCEPTED_WITH_FIXES | REJECTED. Also accepts ACCEPTED_WITH_FIXES -> ACCEPTED.
  * `score` is optional, 0..10.
  */
-export function verdict(root, pid, outcome, { by, note = '', score = null, opId = null }) {
+export function verdict(root, pid, outcome, { by, note = '', score = null, opId = null, env = process.env } = {}) {
   if (!REVIEW_OUTCOMES.has(outcome)) throw new BatonError(`outcome must be one of ${[...REVIEW_OUTCOMES].join('|')}`, { code: 'BAD_STATUS' });
   if (score != null && !(Number.isFinite(score) && score >= 0 && score <= 10)) throw new BatonError('score must be a number from 0 to 10', { code: 'BAD_SCORE' });
   return withLock(stateDir(root), () => {
@@ -777,16 +777,16 @@ export function verdict(root, pid, outcome, { by, note = '', score = null, opId 
         const hasMsg = existing.some((e) => e.kind === 'message' && e.data?.type === 'VERDICT');
         if (!hasMsg) {
           appendEvent(root, {
-            packet: pid, kind: 'message', by, op_id: opId,
+            packet: pid, kind: 'message', by, op_id: opId, env,
             data: { type: 'VERDICT', to: p.agent || 'all', text: `${pid} ${outcome}.${note ? ` ${note}` : ''}` },
           });
         }
         return verdEv;
       }
     }
-    const event = transition(root, pid, outcome, { by, note, opId, data: score == null ? {} : { score } });
+    const event = transition(root, pid, outcome, { by, note, opId, env, data: score == null ? {} : { score } });
     appendEvent(root, {
-      packet: pid, kind: 'message', by, op_id: opId,
+      packet: pid, kind: 'message', by, op_id: opId, env,
       data: { type: 'VERDICT', to: p.agent || 'all', text: `${pid} ${outcome}.${note ? ` ${note}` : ''}` },
     });
     return event;
@@ -1030,8 +1030,8 @@ export function auditEvents(plan, events, config = {}) {
     if (ev.kind === 'verify' && ev.data?.ok) verified[ev.packet] = ev.data.commit ?? null;
     if (ev.kind === 'ready' && (ev.data?.commit ?? null) !== (verified[ev.packet] ?? null)) bad(ev, `${ev.packet} became ready at a commit that was not verified`);
     if (ev.kind === 'verdict') {
-      if (ev.by !== s.reviewer) bad(ev, `verdict on ${ev.packet} by ${ev.by}; the reviewer is ${s.reviewer}`);
-      if (config.requireDifferentReviewer !== false && s.contributors.includes(ev.by)) bad(ev, `verdict on ${ev.packet} by a contributor (${ev.by})`);
+      if (ev.by !== s.reviewer && ev.by !== 'human') bad(ev, `verdict on ${ev.packet} by ${ev.by}; the reviewer is ${s.reviewer}`);
+      if (config.requireDifferentReviewer !== false && ev.by !== 'human' && s.contributors.includes(ev.by)) bad(ev, `verdict on ${ev.packet} by a contributor (${ev.by})`);
       if (ev.prov?.gh?.actor) {
         const revAgent = getAgent(config, s.reviewer);
         if (revAgent?.github && ev.prov.gh.actor.toLowerCase() !== revAgent.github.toLowerCase()) {
