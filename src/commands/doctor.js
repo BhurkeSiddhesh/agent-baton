@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { configPath, loadConfig, planPath } from '../lib/config.js';
 import { loadPlan, validatePlan } from '../lib/plan.js';
-import { verifyLedger } from '../lib/store.js';
+import { verifyLedger, readEvents } from '../lib/store.js';
+import { verifyMarkerPath } from '../lib/engine.js';
 import { isGit } from '../lib/git.js';
 import { packageVersion } from '../lib/paths.js';
 import { loadRegistry } from '../install/registry.js';
@@ -137,6 +138,27 @@ export async function run(ctx, args) {
     if (errs.length) add('ledger', 'error', `${errs.length} ledger integrity problem(s): ${errs[0].id}: ${errs[0].problem}`, 'run "baton ledger verify"; acknowledge known anomalies with an ack event');
     else if (problems.length) add('ledger', 'warn', `${problems.length} ledger note(s): ${problems[0].id}: ${problems[0].problem}`, 'run "baton ledger export" to sync the tracked mirror');
     else add('ledger', 'ok', 'ledger integrity verified');
+  });
+
+  // operations
+  guard('operations', () => {
+    if (!config) return;
+    const plan = fs.existsSync(planPath(root)) ? loadPlan(root) : null;
+    if (!plan) return;
+    const events = readEvents(root);
+    const problems = [];
+    for (const p of plan.packets) {
+      const markerPath = verifyMarkerPath(root, p.id);
+      if (fs.existsSync(markerPath)) {
+        const verifyEvents = events.filter((e) => e.packet === p.id && e.kind === 'verify');
+        const latest = verifyEvents[verifyEvents.length - 1];
+        if (!latest || !latest.data?.ok) {
+          problems.push(`${p.id}: verify marker on disk has no matching ledger verify event`);
+        }
+      }
+    }
+    if (problems.length) add('operations', 'warn', `${problems.length} operation integrity issue(s): ${problems.join('; ')}`, 'run "baton ledger reconcile" to align state');
+    else add('operations', 'ok', 'operations and markers consistent');
   });
 
   // agent CLIs

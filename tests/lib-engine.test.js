@@ -5,7 +5,7 @@ import path from 'node:path';
 import {
   STATUSES, TRANSITIONS, load, derive, flags, transition, begin, heartbeat, reclaim, block, submit, verdict, carry, reassignReviewer, handoff,
   setGate, recordVerify, readyPackets, nextFor, blockingDeps, addFinding, resolveFinding, findingsOf, postMessage, scores, progress, auditEvents,
-  acknowledge, readVerifyMarker, confirmClaim,
+  acknowledge, readVerifyMarker, confirmClaim, findOperationEvents, reconcileOperations, verifyMarkerPath,
 } from '../src/lib/engine.js';
 import { appendEvent, readEvents, orderEvents, eventsDir, eventSha, LEDGER_VERSION } from '../src/lib/store.js';
 import { fingerprint } from '../src/lib/util.js';
@@ -702,5 +702,159 @@ test('reassignReviewer still works on ACCEPTED_WITH_FIXES but not on ACCEPTED', 
     submit(repo.root, 'WP-001', { by: 'codex' });
     verdict(repo.root, 'WP-001', 'ACCEPTED', { by: 'gemini' });
     assert.equal(code(() => reassignReviewer(repo.root, 'WP-001', 'claude', { by: 'claude' })), 'ALREADY_DONE');
+  } finally { done(repo); }
+});
+
+test('BAT-027: begin with opId is crash-safe and idempotent', () => {
+  const repo = setup();
+  try {
+    const res1 = begin(repo.root, 'WP-001', 'codex', { opId: 'op-b1' });
+    assert.equal(res1.event.op_id, 'op-b1');
+    assert.equal(status(repo.root, 'WP-001'), 'IN_PROGRESS');
+
+    // Retrying with the same opId succeeds idempotently without error and creates no duplicate events
+    const countBefore = readEvents(repo.root).length;
+    const res2 = begin(repo.root, 'WP-001', 'codex', { opId: 'op-b1' });
+    assert.equal(res2.idempotent, true);
+    assert.equal(res2.event.id, res1.event.id);
+    assert.equal(readEvents(repo.root).length, countBefore);
+
+    // Simulate crash: begin event was written with opId 'op-crash-1', but process crashed before CLAIM message
+    appendEvent(repo.root, {
+      packet: 'WP-002', kind: 'begin', to: 'IN_PROGRESS', by: 'gemini', note: '', op_id: 'op-crash-1',
+      data: { base: 'c0', lease_until: '2026-10-13T17:00:00Z', lease_token: 1, dep_commits: {} },
+    });
+    const preCount = readEvents(repo.root).length;
+    assert.ok(!readEvents(repo.root).some((e) => e.op_id === 'op-crash-1' && e.kind === 'message'));
+
+    // Retrying the interrupted operation reconciles the missing CLAIM message
+    const resRecovered = begin(repo.root, 'WP-002', 'gemini', { opId: 'op-crash-1' });
+    assert.equal(resRecovered.event.op_id, 'op-crash-1');
+    const postEvents = readEvents(repo.root);
+    assert.equal(postEvents.length, preCount + 1);
+    assert.ok(postEvents.some((e) => e.op_id === 'op-crash-1' && e.kind === 'message' && e.data.type === 'CLAIM'));
+
+    // A further retry appends nothing
+    begin(repo.root, 'WP-002', 'gemini', { opId: 'op-crash-1' });
+    assert.equal(readEvents(repo.root).length, postEvents.length);
+  } finally { done(repo); }
+});
+
+test('BAT-027: submit with opId is crash-safe and idempotent', () => {
+  const repo = setup();
+  try {
+    begin(repo.root, 'WP-001', 'codex');
+    repo.write('work-WP-001.txt', 'done');
+    markVerified(repo.root, 'WP-001');
+
+    const ev1 = submit(repo.root, 'WP-001', { by: 'codex', opId: 'op-sub-1' });
+    assert.equal(ev1.op_id, 'op-sub-1');
+    assert.equal(status(repo.root, 'WP-001'), 'READY_FOR_REVIEW');
+
+    // Retrying with the same opId succeeds idempotently without error and creates no duplicate events
+    const countBefore = readEvents(repo.root).length;
+    const ev2 = submit(repo.root, 'WP-001', { by: 'codex', opId: 'op-sub-1' });
+    assert.equal(ev2.id, ev1.id);
+    assert.equal(readEvents(repo.root).length, countBefore);
+
+    // Simulate crash: ready event was written with opId 'op-sub-crash', but process exited before SIGNOFF message
+    begin(repo.root, 'WP-002', 'codex');
+    markVerified(repo.root, 'WP-002');
+    appendEvent(repo.root, {
+      packet: 'WP-002', kind: 'ready', to: 'READY_FOR_REVIEW', by: 'codex', note: '', op_id: 'op-sub-crash',
+      data: { commit: null, tests: 'ok' },
+    });
+    assert.ok(!readEvents(repo.root).some((e) => e.op_id === 'op-sub-crash' && e.kind === 'message' && e.data.type === 'SIGNOFF'));
+
+    // Retry submit restores the missing SIGNOFF message without throwing INVALID_TRANSITION
+    const recEv = submit(repo.root, 'WP-002', { by: 'codex', opId: 'op-sub-crash' });
+    assert.equal(recEv.op_id, 'op-sub-crash');
+    assert.ok(readEvents(repo.root).some((e) => e.op_id === 'op-sub-crash' && e.kind === 'message' && e.data.type === 'SIGNOFF'));
+
+    // Subsequent retry appends no duplicate messages
+    const countAfter = readEvents(repo.root).length;
+    submit(repo.root, 'WP-002', { by: 'codex', opId: 'op-sub-crash' });
+    assert.equal(readEvents(repo.root).length, countAfter);
+  } finally { done(repo); }
+});
+
+test('BAT-027: verdict with opId is crash-safe and idempotent', () => {
+  const repo = setup();
+  try {
+    toReady(repo, 'WP-001', 'codex');
+    const v1 = verdict(repo.root, 'WP-001', 'ACCEPTED', { by: 'claude', score: 9, opId: 'op-verd-1' });
+    assert.equal(v1.op_id, 'op-verd-1');
+    assert.equal(status(repo.root, 'WP-001'), 'ACCEPTED');
+
+    // Retrying with the same opId succeeds idempotently without duplicate verdict or message
+    const countBefore = readEvents(repo.root).length;
+    const v2 = verdict(repo.root, 'WP-001', 'ACCEPTED', { by: 'claude', score: 9, opId: 'op-verd-1' });
+    assert.equal(v2.id, v1.id);
+    assert.equal(readEvents(repo.root).length, countBefore);
+
+    // Retrying with conflicting outcome under same opId fails with OP_CONFLICT
+    assert.equal(code(() => verdict(repo.root, 'WP-001', 'REJECTED', { by: 'claude', opId: 'op-verd-1' })), 'OP_CONFLICT');
+
+    // Simulate crash: verdict event written but crashed before VERDICT message
+    toReady(repo, 'WP-002', 'codex');
+    appendEvent(repo.root, {
+      packet: 'WP-002', kind: 'verdict', to: 'ACCEPTED_WITH_FIXES', by: 'claude', note: 'fix spelling', op_id: 'op-verd-crash',
+      data: { commit: null, score: 7 },
+    });
+    assert.ok(!readEvents(repo.root).some((e) => e.op_id === 'op-verd-crash' && e.kind === 'message' && e.data.type === 'VERDICT'));
+
+    // Retry restores the missing VERDICT message
+    const recV = verdict(repo.root, 'WP-002', 'ACCEPTED_WITH_FIXES', { by: 'claude', note: 'fix spelling', opId: 'op-verd-crash' });
+    assert.equal(recV.op_id, 'op-verd-crash');
+    assert.ok(readEvents(repo.root).some((e) => e.op_id === 'op-verd-crash' && e.kind === 'message' && e.data.type === 'VERDICT'));
+  } finally { done(repo); }
+});
+
+test('BAT-027: uncommitted or orphaned verify markers never authorize READY_FOR_REVIEW', () => {
+  const repo = setup();
+  try {
+    begin(repo.root, 'WP-001', 'codex');
+    // Place a forged or orphaned verify marker on disk without a corresponding verify ledger event
+    fs.mkdirSync(path.join(repo.root, '.baton', 'state', 'verified'), { recursive: true });
+    fs.writeFileSync(verifyMarkerPath(repo.root, 'WP-001'), JSON.stringify({
+      packet: 'WP-001', ok: true, mode: 'snapshot', commit: null, lease_token: 1, fingerprint: fingerprint(repo.root), tests: { ok: true },
+    }));
+
+    // submit fails closed: no passing verify event found in ledger
+    assert.equal(code(() => submit(repo.root, 'WP-001', { by: 'codex' })), 'NOT_VERIFIED');
+    assert.equal(status(repo.root, 'WP-001'), 'IN_PROGRESS');
+
+    // reconcileOperations cleans the unauthorized marker
+    const rec = reconcileOperations(repo.root);
+    assert.ok(rec.clearedMarkers.includes('WP-001'));
+    assert.equal(readVerifyMarker(repo.root, 'WP-001'), null);
+
+    // After authenticating with recordVerify, submit succeeds
+    markVerified(repo.root, 'WP-001');
+    submit(repo.root, 'WP-001', { by: 'codex' });
+    assert.equal(status(repo.root, 'WP-001'), 'READY_FOR_REVIEW');
+  } finally { done(repo); }
+});
+
+test('BAT-027: reconcileOperations restores lost disk markers and unfinished messages', () => {
+  const repo = setup();
+  try {
+    begin(repo.root, 'WP-001', 'codex');
+    markVerified(repo.root, 'WP-001');
+    // Delete the on-disk verify marker while the ledger event exists
+    fs.unlinkSync(verifyMarkerPath(repo.root, 'WP-001'));
+    assert.equal(readVerifyMarker(repo.root, 'WP-001'), null);
+
+    // Simulate incomplete submit operation
+    appendEvent(repo.root, {
+      packet: 'WP-001', kind: 'ready', to: 'READY_FOR_REVIEW', by: 'codex', note: '', op_id: 'op-reconcile-1',
+      data: { commit: null, tests: 'passed' },
+    });
+
+    const report = reconcileOperations(repo.root);
+    assert.ok(report.restoredMarkers.includes('WP-001'));
+    assert.ok(report.reconciled.some((m) => m.includes('op-reconcile-1')));
+    assert.equal(readVerifyMarker(repo.root, 'WP-001').ok, true);
+    assert.ok(readEvents(repo.root).some((e) => e.op_id === 'op-reconcile-1' && e.kind === 'message' && e.data.type === 'SIGNOFF'));
   } finally { done(repo); }
 });

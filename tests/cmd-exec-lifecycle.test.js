@@ -232,3 +232,42 @@ test('reassign changes the reviewer under the rules; handoff moves the author an
   assert.equal((await cli(r.root, ['handoff', 'WP-001', '--to', 'gemini', '--by', 'gemini'])).status, 1); // new author is the reviewer
   assert.equal((await cli(r.root, ['begin', 'WP-001', '--agent', 'claude'])).status, 0);
 });
+
+test('BAT-027: CLI commands accept --op-id and baton ledger reconcile works', async () => {
+  const r = repo();
+  // begin with --op-id
+  const b1 = await cli(r.root, ['begin', 'WP-001', '--agent', 'codex', '--op-id', 'cli-op-1', '--json']);
+  assert.equal(b1.status, 0, b1.stderr);
+  assert.equal(await status(r, 'WP-001'), 'IN_PROGRESS');
+
+  // retry begin with same --op-id succeeds idempotently
+  const b2 = await cli(r.root, ['begin', 'WP-001', '--agent', 'codex', '--op-id', 'cli-op-1', '--json']);
+  assert.equal(b2.status, 0, b2.stderr);
+
+  // verify and submit with --op-id
+  r.write('src/api/export.js', '// done\n');
+  const v = await cli(r.root, ['verify', 'WP-001', '--op-id', 'cli-op-v']);
+  assert.equal(v.status, 0, v.stderr);
+
+  const s1 = await cli(r.root, ['submit', 'WP-001', '--agent', 'codex', '--op-id', 'cli-op-sub']);
+  assert.equal(s1.status, 0, s1.stderr);
+  assert.equal(await status(r, 'WP-001'), 'READY_FOR_REVIEW');
+
+  // retry submit with same --op-id succeeds idempotently
+  const s2 = await cli(r.root, ['submit', 'WP-001', '--agent', 'codex', '--op-id', 'cli-op-sub']);
+  assert.equal(s2.status, 0, s2.stderr);
+
+  // accept with --op-id
+  const a1 = await cli(r.root, ['accept', 'WP-001', '--by', 'claude', '--op-id', 'cli-op-acc']);
+  assert.equal(a1.status, 0, a1.stderr);
+  assert.equal(await status(r, 'WP-001'), 'ACCEPTED');
+
+  // retry accept with same --op-id succeeds idempotently
+  const a2 = await cli(r.root, ['accept', 'WP-001', '--by', 'claude', '--op-id', 'cli-op-acc']);
+  assert.equal(a2.status, 0, a2.stderr);
+
+  // ledger reconcile command
+  const rec = await cli(r.root, ['ledger', 'reconcile', '--json']);
+  assert.equal(rec.status, 0, rec.stderr);
+  assert.ok(json(rec).reconciled !== undefined);
+});

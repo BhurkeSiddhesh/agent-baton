@@ -6,6 +6,8 @@ All notable changes to Agent Baton are documented here. The format follows
 
 ## [Unreleased]
 
+- Multi-event transitions (`begin`, `reclaim`, `submit`, `verdict`, `block`, `handoff`, `reassign`, `gate`) now support explicit operation IDs (`op_id` / `--op-id`) for crash-safe idempotent retries; interrupted transitions recover without duplicate verdict events or broadcast messages, `submit` enforces authenticated ledger verify events, and `baton ledger reconcile` resolves incomplete operations.
+
 - Monotonically increasing fencing tokens (`lease_token`) are now issued on packet claims and takeovers; verify markers bind to the active lease generation, `submit` rejects stale lease tokens, and heartbeats from revoked generations cannot revive expired leases.
 
 - Simultaneous claims across independent clones are arbitrated deterministically by first valid causal claim; losing claimants are flagged with `CLAIM_CONFLICT` and cannot submit branches as packet holders, with CAS `--expected-rev` and `confirmClaim` available for workers.

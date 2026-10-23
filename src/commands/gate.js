@@ -5,12 +5,13 @@ import { makePainter, renderTable } from '../lib/views.js';
 export const name = 'gate';
 export const group = 'Planning';
 export const summary = 'List, open or close human gates';
-export const usage = 'baton gate <list|open|close> [id] --by <actor> [--note "..."] [--json]';
+export const usage = 'baton gate <list|open|close> [id] --by <actor> [--note "..."] [--op-id <id>] [--json]';
 export const description = 'Gates are human decisions that block packets until opened. Only the gate owner or "human" may open or close one.';
 export const examples = ['baton gate list', 'baton gate open G1 --by human --note "key provisioned"'];
 export const options = {
   by: { type: 'string', description: 'who opens or closes the gate (the owner, or human)' },
   note: { type: 'string', description: 'reason recorded with the decision' },
+  'op-id': { type: 'string', description: 'idempotent operation id' },
   json: { type: 'boolean' },
 };
 
@@ -44,7 +45,8 @@ export async function run(ctx, args) {
   }
   if (!id) throw new UsageError(`gate ${sub} needs a gate id`);
   const by = ctx.agent(args.by, { required: true });
-  const ev = setGate(ctx.root, id, sub === 'open', { by, note: args.note || '' });
+  const opId = args['op-id'] || null;
+  const ev = setGate(ctx.root, id, sub === 'open', { by, note: args.note || '', opId });
   if (args.json) ctx.json({ gate: id, open: sub === 'open', by, event: ev.id });
   else ctx.out(`gate ${id} ${sub === 'open' ? 'opened' : 'closed'} by ${by}`);
   return 0;

@@ -4,12 +4,13 @@ import { handoff, load } from '../lib/engine.js';
 export const name = 'handoff';
 export const group = 'Execution';
 export const summary = 'Hand a packet to another author (releases it when in progress)';
-export const usage = 'baton handoff <packet> --to <agent> --by <agent> [--note "..."] [--json]';
+export const usage = 'baton handoff <packet> --to <agent> --by <agent> [--note "..."] [--op-id <id>] [--json]';
 export const options = {
   to: { type: 'string', description: 'new author id' },
   by: { type: 'string', description: 'current author/holder or the orchestrator (or BATON_AGENT)' },
   agent: { type: 'string', alias: 'a', description: 'alias of --by' },
   note: { type: 'string', description: 'context for the new author' },
+  'op-id': { type: 'string', description: 'idempotent operation id' },
   json: { type: 'boolean', description: 'print a JSON document' },
 };
 
@@ -18,7 +19,8 @@ export async function run(ctx, args) {
   if (!pid) throw new UsageError(`missing packet id. Usage: ${usage}`);
   if (!args.to) throw new UsageError(`missing --to. Usage: ${usage}`);
   const by = ctx.agent(args.by || args.agent);
-  const ev = handoff(ctx.root, pid, { to: args.to, by, note: args.note || '' });
+  const opId = args['op-id'] || null;
+  const ev = handoff(ctx.root, pid, { to: args.to, by, note: args.note || '', opId });
   const status = load(ctx.root).state.packets[pid].status;
   const released = ev.to === 'BLOCKED';
   if (args.json) ctx.json({ packet: pid, by, to: args.to, status, released });

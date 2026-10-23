@@ -214,6 +214,7 @@ export function appendEvent(root, partial) {
       data: partial.data ?? {},
       hv: LEDGER_VERSION,
     };
+    if (partial.op_id != null && String(partial.op_id).trim()) ev.op_id = String(partial.op_id).trim();
     const stream = eventStream(ev);
     const prior = existing.filter((item) => eventStream(item) === stream);
     const parent = prior[prior.length - 1];
