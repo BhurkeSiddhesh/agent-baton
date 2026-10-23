@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "goal": "Build robust calculator module with arithmetic and advanced operations",
+  "tracks": [
+    {
+      "id": "core",
+      "owner": "codex",
+      "theme": "Core Arithmetic",
+      "owns": [
+        "src/calculator.js",
+        "test/calculator.test.js"
+      ]
+    }
+  ],
+  "gates": [],
+  "milestones": [
+    {
+      "id": "M1",
+      "title": "v1.0 Release",
+      "due": "2026-11-01"
+    }
+  ],
+  "packets": [
+    {
+      "id": "WP-001",
+      "title": "Implement core arithmetic functions and test suite",
+      "track": "core",
+      "agent": "codex",
+      "reviewer": "claude",
+      "profile": "workspace-write",
+      "owns": [
+        "src/calculator.js",
+        "test/calculator.test.js"
+      ],
+      "reads": [
+        "package.json"
+      ],
+      "deps": [],
+      "needs_done": [],
+      "gate": null,
+      "gate_mode": "start",
+      "priority": "P0",
+      "milestone": "M1",
+      "stretch": false,
+      "test": "node --test test/**/*.test.js",
+      "description": "Implement add, subtract, multiply, divide, power, factorial functions with complete unit test coverage.",
+      "done_checks": [
+        "all arithmetic operations implemented",
+        "input validation prevents invalid types",
+        "division by zero throws RangeError",
+        "unit test suite passes with 100% success"
+      ]
+    }
+  ]
+}
