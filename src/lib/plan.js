@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import { BatonError } from './errors.js';
 import { readJson, writeJsonAtomic, canonicalJson, sha256, toPosix } from './util.js';
-import { patternsOverlap, matchPath, isProtected } from './glob.js';
-import { planPath, PERMISSION_PROFILES } from './config.js';
+import { patternsOverlap, matchPath, isProtected, isOrchestratorOnly, isReadOnly } from './glob.js';
+import { planPath, PERMISSION_PROFILES, hasRole } from './config.js';
 
 export const PRIORITIES = ['P0', 'P1', 'P2', 'P3'];
 export const GATE_MODES = ['start', 'live_only'];
@@ -21,7 +21,7 @@ export function idProblem(id) {
 }
 
 const PACKET_KEY_ORDER = ['id', 'title', 'track', 'agent', 'reviewer', 'profile', 'owns', 'reads', 'deps', 'needs_done', 'gate', 'gate_mode',
-  'priority', 'milestone', 'stretch', 'test', 'description', 'done_checks'];
+  'priority', 'milestone', 'stretch', 'allow_protected', 'test', 'description', 'done_checks'];
 const TRACK_KEY_ORDER = ['id', 'owner', 'theme', 'owns'];
 const GATE_KEY_ORDER = ['id', 'title', 'owner', 'open', 'needed_by'];
 const MILESTONE_KEY_ORDER = ['id', 'title', 'due'];
@@ -47,6 +47,7 @@ export function normalizePacket(p) {
     test: p.test ?? null,
     description: p.description ?? '',
     done_checks: Array.isArray(p.done_checks) ? p.done_checks : [],
+    allow_protected: p.allow_protected === true,
   };
 }
 
@@ -213,9 +214,17 @@ export function validatePlan(plan, config, { done = [] } = {}) {
   const errors = [];
   const warnings = [];
   if (!plan || typeof plan !== 'object') return { errors: ['plan must be a JSON object'], warnings };
+  if (plan.protected !== undefined) {
+    errors.push('plan must not define "protected"; protected policies are immutable in plan and managed in .baton/config.json');
+  }
+  if (plan.config !== undefined) {
+    errors.push('plan must not define "config"; configuration must not be embedded in plan');
+  }
   const pl = normalizePlan(plan);
   const roster = new Set((config.agents || []).map((a) => a.id));
   const extra = config.protected?.globs || [];
+  const orchExtra = config.protected?.orchestratorOnly || [];
+  const readOnlyExtra = config.protected?.readOnly || [];
   const doneSet = new Set(done);
   if (pl.version !== 1) errors.push(`plan.version must be 1 (got ${JSON.stringify(plan.version)})`);
 
@@ -228,7 +237,20 @@ export function validatePlan(plan, config, { done = [] } = {}) {
     trackIds.add(t.id);
     if (!roster.has(t.owner)) errors.push(`track ${t.id}: owner "${t.owner}" is not in the roster`);
     if (!Array.isArray(t.owns) || !t.owns.length) warnings.push(`track ${t.id}: owns nothing`);
-    for (const o of t.owns || []) { const b = badPath(o); if (b) errors.push(`track ${t.id}: owns path ${JSON.stringify(o)} ${b}`); }
+    for (const o of t.owns || []) {
+      const b = badPath(o);
+      if (b) { errors.push(`track ${t.id}: owns path ${JSON.stringify(o)} ${b}`); continue; }
+      if (isProtected(o, extra)) {
+        errors.push(`track ${t.id}: owns protected path ${o}`);
+      } else if (isOrchestratorOnly(o, orchExtra)) {
+        const isOrch = t.owner === config.orchestrator || t.owner === 'human' || hasRole(config, t.owner, 'orchestrator');
+        if (!isOrch) {
+          errors.push(`track ${t.id}: unauthorized claim of orchestrator-only path "${o}": owner "${t.owner}" lacks orchestrator role`);
+        }
+      } else if (isReadOnly(o, readOnlyExtra)) {
+        errors.push(`track ${t.id}: read-only path "${o}" cannot be claimed in owns`);
+      }
+    }
   }
   for (let i = 0; i < pl.tracks.length; i++) {
     for (let j = i + 1; j < pl.tracks.length; j++) {
@@ -285,7 +307,40 @@ export function validatePlan(plan, config, { done = [] } = {}) {
     for (const o of p.owns) {
       const b = badPath(o);
       if (b) { errors.push(at(`owns path ${JSON.stringify(o)} ${b}`)); continue; }
-      if (isProtected(o, extra)) errors.push(at(`owns protected path ${o}`));
+
+      if (isProtected(o, extra)) {
+        const isOrch = p.agent && (p.agent === config.orchestrator || p.agent === 'human' || hasRole(config, p.agent, 'orchestrator'));
+        const hasException = Boolean(p.allow_protected);
+        const hasJustification = Boolean(p.description && String(p.description).trim().length > 0);
+
+        if (hasException && !isOrch) {
+          errors.push(at(`unauthorized protected path exception: agent "${p.agent}" lacks orchestrator role`));
+        } else if (hasException && isOrch && !hasJustification) {
+          errors.push(at(`protected path exception requires documented justification in description`));
+        }
+
+        if (!(hasException && isOrch && hasJustification)) {
+          errors.push(at(`owns protected path ${o}`));
+        }
+        continue;
+      }
+
+      if (isOrchestratorOnly(o, orchExtra)) {
+        if (!p.agent) {
+          errors.push(at(`orchestrator-only path "${o}" cannot be claimed without an assigned orchestrator agent`));
+        } else {
+          const isOrch = p.agent === config.orchestrator || p.agent === 'human' || hasRole(config, p.agent, 'orchestrator');
+          if (!isOrch) {
+            errors.push(at(`unauthorized claim of orchestrator-only path "${o}": agent "${p.agent}" lacks orchestrator role`));
+          }
+        }
+        continue;
+      }
+
+      if (isReadOnly(o, readOnlyExtra)) {
+        errors.push(at(`read-only path "${o}" cannot be claimed in owns`));
+        continue;
+      }
     }
     let track = null;
     if (p.track != null) {

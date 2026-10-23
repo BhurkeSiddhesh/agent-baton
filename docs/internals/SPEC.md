@@ -158,7 +158,8 @@ Every event is validated against ledger schema v1 at append, read, verify and im
 | `snapshot.js` | non-git mode: `takeSnapshot(root)` (path->sha1 map saved at `begin`), `diffSnapshot(root,pid)` |
 | `context.js` | `buildContext(...)`, lazy `loadState()` returning `{config, plan, events, state}` |
 
-Built-in protected paths (reject in `owns`, flag in `verify`): `.git/`, `.env`, `.env.*` (except `.env.example`), `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa*`, `*credentials*.json`, `client_secret*.json`, `token*.json`, `*.sqlite`, `*.sqlite3`, `*.db`, `secrets/`, plus `config.protected.globs`.
+Built-in protected paths (reject in `owns`, flag in `verify`): `.git/`, `.env`, `.env.*` (except `.env.example`), `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.crt`, `*.cer`, `*.der`, `*.p8`, `id_rsa*`, `id_ed25519*`, `id_ecdsa*`, `id_dsa*`, `*credentials*.json`, `client_secret*.json`, `token*.json`, `*azure*token*`, `*.sqlite`, `*.sqlite3`, `*.db`, `*.duckdb`, `*.kdbx`, `secrets/`, `.aws/credentials`, `gcloud/credentials.db`, plus `config.protected.globs`.
+Built-in orchestrator-only paths (reject in `owns` without orchestrator role): `.baton/config.json`, `AGENTS.md`, `docs/GOVERNANCE.md`.
 Built-in coordination paths (any packet may touch, never counted as scope violations): `.baton/ledger/`, `.baton/state/`, `.baton/views/`, plus `config.coordination`.
 
 ## 4. CLI surface (every command supports `-h/--help`; query commands support `--json`)
