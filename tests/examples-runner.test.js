@@ -98,8 +98,15 @@ test('Node example test suite executes and passes 100%', () => {
   assert.match(res.stdout, /pass 7/);
 });
 
-test('Python example test suite executes and passes 100%', () => {
-  const res = spawnSync('python', ['tests/test_calculator.py'], {
+test('Python example test suite executes and passes 100%', (t) => {
+  const pyCmd = process.platform === 'win32' ? 'python' : 'python3';
+  const probe = spawnSync(pyCmd, ['--version'], { encoding: 'utf8' });
+  if (probe.error || probe.status !== 0) {
+    t.skip(`Python not available in environment (${pyCmd} not found)`);
+    return;
+  }
+
+  const res = spawnSync(pyCmd, ['tests/test_calculator.py'], {
     cwd: PYTHON_DIR,
     encoding: 'utf8',
     env: cleanChildEnv(),
