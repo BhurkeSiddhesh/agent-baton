@@ -180,9 +180,10 @@ test('every declared event kind has a valid v1 schema fixture', () => {
     finding: { fid: 'AUD-001', severity: 'MAJOR' }, finding_resolved: { fid: 'AUD-001', resolution: 'fixed', confirm: false },
     message: { type: 'NOTICE', to: 'all', text: 'hello' }, gate: { gate: 'G1', open: true }, plan: { hash: 'abc' },
     init: { version: '0.1.0', agents: ['codex'] }, ack: { event: '20260101T000000Z-abcdef' },
+    approval: { gate_id: 'GATE-001', action: 'deploy', target: 'prod', risk: 'destructive', status: 'REQUESTED' },
   };
   const transitions = new Set(['begin', 'reclaim', 'status', 'ready', 'verdict']);
-  const nonPacket = new Set(['message', 'gate', 'plan', 'init', 'ack']);
+  const nonPacket = new Set(['message', 'gate', 'plan', 'init', 'ack', 'approval']);
   for (const kind of EVENT_KINDS) {
     const ev = {
       id: '20260101T000000Z-000001', ts: '2026-01-01T00:00:00Z', packet: nonPacket.has(kind) ? null : 'WP-001',

@@ -1,7 +1,7 @@
 export const LEDGER_VERSION = 1;
 export const MIN_LEDGER_VERSION = 0;
 export const EVENT_KINDS = ['begin', 'heartbeat', 'reclaim', 'status', 'ready', 'verdict', 'reviewer', 'handoff', 'verify', 'merged',
-  'finding', 'finding_resolved', 'message', 'gate', 'plan', 'init', 'ack'];
+  'finding', 'finding_resolved', 'message', 'gate', 'plan', 'init', 'ack', 'approval'];
 export const EVENT_ID_RE = /^\d{8}T\d{6}Z-[0-9a-f]{6}$/;
 
 const packetKinds = new Set(['begin', 'heartbeat', 'reclaim', 'status', 'ready', 'verdict', 'reviewer', 'handoff', 'verify', 'merged', 'finding', 'finding_resolved']);
@@ -29,6 +29,19 @@ const dataRules = {
   plan: { hash: string },
   init: { version: optionalString, agents: (v) => v == null || (Array.isArray(v) && v.every(string)) },
   ack: { event: (v) => string(v) && EVENT_ID_RE.test(v) },
+  approval: {
+    gate_id: string,
+    action: string,
+    target: string,
+    risk: (v) => typeof v === 'string' && ['read-only', 'normal', 'privileged', 'destructive'].includes(v),
+    status: (v) => typeof v === 'string' && ['REQUESTED', 'APPROVED', 'DENIED', 'EXPIRED', 'CANCELLED'].includes(v),
+    session_id: optionalString,
+    commit: optionalString,
+    reason: optionalString,
+    expires_at: optionalString,
+    approver: optionalString,
+    context_sha: optionalString,
+  },
 };
 
 /** Validate an on-disk event shape. Lifecycle authorization belongs to engine.js. */

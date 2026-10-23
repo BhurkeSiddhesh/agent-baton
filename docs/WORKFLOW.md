@@ -151,12 +151,47 @@ baton plan graph
 baton plan graph --mermaid
 ```
 
-#### Human Gates
+#### Human Gates & Risk-Tiered Approval
 
-If a packet depends on architectural review, API tokens, or human sign-off, it specifies a `gate`:
+Baton supports both static plan gates and dynamic, risk-tiered approval gates for operations:
+
+##### Risk Tiers
+
+Operations and actions are classified into four risk tiers:
+- **`read-only`**: Non-mutating queries, inspections and status checks (`read`, `query`, `status`, `scores`, `check`). Never blocked by gates.
+- **`normal`**: Scoped write operations within standard ownership boundaries.
+- **`privileged`**: High-impact or configuration-altering actions (`deploy`, `publish`, `release`, `merge`, `config`). Requires explicit authorization by `human` or an authorized `orchestrator`.
+- **`destructive`**: Data-loss or irreversible actions (`delete`, `destroy`, `rm`, `purge`, `reset`, `force-push`, `rollback`). Strictly requires explicit authorization by `human` or an authorized `orchestrator`.
+
+##### Gate Ownership & Lifecycle
+
+Dynamic approval gates transition through five lifecycle states:
+`REQUESTED` ➔ `APPROVED` | `DENIED` | `EXPIRED` | `CANCELLED`
+
+- **Role Enforcement**: Only `human` or an agent with the `orchestrator` role may approve `privileged` and `destructive` operations. Workers cannot approve privileged/destructive gates, and agents cannot self-approve their own privileged/destructive requests.
+- **Immutable Action Context**: Approval decisions capture immutable session and commit identifiers (`session_id`, `commit`, `context_sha`). An approval cannot be repurposed for mutated parameters or arbitrary commits.
+- **TTL & Expiration**: Approval requests can include a time-to-live (`--ttl <seconds>`). Once expired, approvals are invalid and cannot authorize execution.
+- **Denial Semantics**: Once an operation request is denied (`DENIED`), retrying the exact same operation/commit without a newly submitted and approved gate remains strictly blocked (`APPROVAL_DENIED`).
+
+##### Gate CLI Commands
 
 ```bash
-# Inspect all project gates
+# Request approval for a risk-tiered operation
+baton gate request deploy production --risk destructive --reason "Production v1.0 release"
+
+# List gates filtered by status
+baton gate list --status REQUESTED
+
+# Approve a gate (human or orchestrator)
+baton gate approve GATE-001 --by human
+
+# Deny a gate with an audit reason
+baton gate deny GATE-001 --by human --reason "Migrations require zero-downtime compatibility"
+
+# Check gate approval status
+baton gate check GATE-001
+
+# Inspect all plan gates and dynamic approvals
 baton gate list
 
 # Open a blocking gate with justification

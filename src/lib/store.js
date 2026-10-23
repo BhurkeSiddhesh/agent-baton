@@ -81,6 +81,7 @@ const cmp = (a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : a.id < b.id ? -1 : a
 export function eventStream(ev) {
   if (typeof ev.packet === 'string') return `packet:${ev.packet}`;
   if (ev.kind === 'gate' && typeof ev.data?.gate === 'string') return `gate:${ev.data.gate}`;
+  if (ev.kind === 'approval' && typeof ev.data?.gate_id === 'string') return `approval:${ev.data.gate_id}`;
   return `global:${ev.kind}`;
 }
 
