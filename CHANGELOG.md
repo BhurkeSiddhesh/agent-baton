@@ -6,6 +6,8 @@ All notable changes to Agent Baton are documented here. The format follows
 
 ## [Unreleased]
 
+- Added read-only post-release verification that aligns GitHub release metadata with the tag, package version and changelog, compares the fetched GitHub package byte-for-byte with the tagged checkout, and smoke-installs it on Linux, Windows and macOS.
+
 ### Added
 
 - Automated zero-dependency offline package contract, optional-service exclusion, no-network Node smoke, and recorded tarball/cold-start budget evidence in CI.

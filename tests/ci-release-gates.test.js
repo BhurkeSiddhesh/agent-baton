@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { REQUIRED_CI_JOBS, evaluateRequiredResults } from '../.github/scripts/assert-required-ci.mjs';
 import { validateReleaseTag } from '../.github/scripts/assert-release-tag.mjs';
 import { checksumPackEntry } from '../.github/scripts/write-package-checksum.mjs';
+import { changelogSection, validateReleaseMetadata } from '../.github/scripts/verify-release-metadata.mjs';
+import { comparePackEntries, githubSpec } from '../.github/scripts/verify-github-install.mjs';
 
 test('tag/version validation accepts exact release tags and rejects mismatches', () => {
   for (const v of ['0.1.0', '1.2.3', '2.0.0-alpha.3', '2.3.4+build.1']) {
@@ -18,6 +20,37 @@ test('tag/version validation accepts exact release tags and rejects mismatches',
   const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   assert.equal(spawnSync(process.execPath, [cli, 'v' + pkg.version], { encoding: 'utf8' }).status, 0);
   assert.equal(spawnSync(process.execPath, [cli, 'v999.999.999'], { encoding: 'utf8' }).status, 1);
+});
+
+test('published release metadata must align with package version and changelog', () => {
+  const changelog = '# Changes\n\n## [0.2.0] - 2026-10-23\n\nRepeatable release.\n\n## [0.1.0]\n\nOld.\n';
+  assert.equal(changelogSection(changelog, '0.2.0'), 'Repeatable release.');
+  assert.equal(changelogSection(changelog, '0.1.0'), 'Old.');
+  const good = { tagName: 'v0.2.0', name: 'Agent Baton 0.2.0', body: 'Repeatable release.', isDraft: false };
+  assert.deepEqual(validateReleaseMetadata(good, { version: '0.2.0' }, changelog), []);
+  assert.ok(validateReleaseMetadata({ ...good, tagName: 'v0.1.0' }, { version: '0.2.0' }, changelog).length);
+  assert.ok(validateReleaseMetadata({ ...good, body: 'different notes' }, { version: '0.2.0' }, changelog).length);
+});
+
+test('GitHub package comparison binds exact bytes and file manifest', () => {
+  const entry = { name: 'agent-baton', version: '0.2.0', integrity: 'sha512-example', shasum: 'abc', size: 10, unpackedSize: 20, files: [{ path: 'bin/baton.js', size: 5, mode: 493 }] };
+  assert.deepEqual(comparePackEntries(entry, structuredClone(entry)), []);
+  assert.ok(comparePackEntries(entry, { ...entry, integrity: 'sha512-other' }).length);
+  assert.ok(comparePackEntries(entry, { ...entry, files: [{ path: 'bin/other.js', size: 5, mode: 493 }] }).length);
+  assert.equal(githubSpec('BhurkeSiddhesh/agent-baton', 'v0.2.0'), 'git+https://github.com/BhurkeSiddhesh/agent-baton.git#v0.2.0');
+  assert.throws(() => githubSpec('owner/repo;bad', 'v0.2.0'));
+});
+
+test('post-release workflow verifies metadata before supported-platform install smoke', () => {
+  const workflow = fs.readFileSync(new URL('../.github/workflows/release-verify.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /release:\s*\n\s+types: \[published\]/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /ref: \$\{\{ env\.RELEASE_TAG \}\}/);
+  assert.match(workflow, /verify-release-metadata\.mjs/);
+  assert.match(workflow, /os: \[ubuntu-latest, windows-latest, macos-latest\]/);
+  assert.match(workflow, /verify-github-install\.mjs/);
+  assert.match(workflow, /needs: \[metadata\]/);
+  assert.doesNotMatch(workflow, /npm publish|gh release create/);
 });
 
 test('release candidate checksum binds exact name/version and bytes', () => {
