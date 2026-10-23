@@ -1,0 +1,18 @@
+{
+  "name": "example-node-calculator",
+  "version": "1.0.0",
+  "description": "Example Node.js project integrated with Agent Baton",
+  "type": "module",
+  "main": "src/calculator.js",
+  "scripts": {
+    "test": "node --test test/**/*.test.js"
+  },
+  "keywords": [
+    "agent-baton",
+    "calculator",
+    "example",
+    "node"
+  ],
+  "author": "Agent Baton Team",
+  "license": "MIT"
+}
