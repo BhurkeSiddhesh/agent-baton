@@ -1,7 +1,7 @@
 import { toPosix } from './util.js';
 
 /** Paths any packet may touch; never counted as scope violations. */
-export const BUILTIN_COORDINATION = ['.baton/ledger/', '.baton/state/', '.baton/views/'];
+export const BUILTIN_COORDINATION = ['.baton/ledger/', '.baton/state/', '.baton/views/', '.baton/archives/'];
 
 /** Paths reserved exclusively for orchestrator authority / administration. */
 export const BUILTIN_ORCHESTRATOR_ONLY = [
