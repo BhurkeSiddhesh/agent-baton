@@ -5,7 +5,7 @@ import { utcnow, stamp, addHours, parseTime, daysUntil, readJson, writeJsonAtomi
 import { loadConfig, hasRole, getAgent, isKnownActor, RESERVED_AGENTS } from './config.js';
 import { loadPlan, packetsOverlap } from './plan.js';
 import { patternsOverlap, BUILTIN_COORDINATION } from './glob.js';
-import { appendEvent, readEvents, stateDir, stateSub, EVENT_KINDS } from './store.js';
+import { appendEvent, readEvents, stateDir, stateSub, EVENT_KINDS, assertSensitiveReplay } from './store.js';
 import { withLock } from './lock.js';
 import { headCommit, isDirty } from './git.js';
 import { saveSnapshot, packetFingerprint } from './snapshot.js';
@@ -363,6 +363,9 @@ export function postMessage(root, { from, to = 'all', type, text, packet = null,
 export function transition(root, pid, to, { by = null, note = '', kind = 'status', data = {}, opId = null } = {}) {
   return withLock(stateDir(root), () => {
     const { config, plan, state } = load(root);
+    if (['ACCEPTED', 'ACCEPTED_WITH_FIXES', 'READY_FOR_REVIEW'].includes(to)) {
+      assertSensitiveReplay(root, { packet: pid, action: `transition to ${to}`, config });
+    }
     const p = getPacket(plan, pid);
     checkIdentity(by);
     const s = state.packets[pid];

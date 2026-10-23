@@ -6,6 +6,8 @@ All notable changes to Agent Baton are documented here. The format follows
 
 ## [Unreleased]
 
+- Pre-replay integrity verification (`assertSensitiveReplay`) now guards sensitive transitions (`submit`, `accept`, `merge`); refuses transitions and fast-forwards if unacknowledged corrupt, tampered, or divergent events exist, and adds optional cryptographic attestation support (`createEventAttestation`, `verifyEventAttestation`, `signEvent`, `requireAttestation`) for tamper detection and identity non-repudiation.
+
 - Designed and implemented diverged clone ledger reconciliation (`baton ledger reconcile [--from <dir>] [--dry-run] [--json]`), providing deterministic merging of independent safe events across clones while surfacing corrupt events, missing causal parents, concurrent revision collisions, competing claims, and contradictory verdicts without silent overwrite.
 
 - Multi-event transitions (`begin`, `reclaim`, `submit`, `verdict`, `block`, `handoff`, `reassign`, `gate`) now support explicit operation IDs (`op_id` / `--op-id`) for crash-safe idempotent retries; interrupted transitions recover without duplicate verdict events or broadcast messages, `submit` enforces authenticated ledger verify events, and `baton ledger reconcile` resolves incomplete operations.
