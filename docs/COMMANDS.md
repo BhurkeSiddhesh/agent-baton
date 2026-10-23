@@ -38,7 +38,7 @@ shorthand for `node .baton/runtime/bin/baton.js` (or `npx agent-baton` outside a
 | [`plan`](#baton-plan) | Show, validate, edit, import or graph the plan |
 | [`split`](#baton-split) | Build the planning prompt for a goal, optionally run an agent CLI on it |
 | [`assign`](#baton-assign) | Fill missing authors and reviewers deterministically |
-| [`gate`](#baton-gate) | List, open or close human gates |
+| [`gate`](#baton-gate) | Request, approve, deny, check or list risk-tiered human approval gates |
 | [`prompt`](#baton-prompt) | Print a role prompt with project variables filled in |
 
 **Queries**
@@ -319,21 +319,29 @@ Options:
 ### baton gate
 
 ```text
-baton gate <list|open|close> [id] --by <actor> [--note "..."] [--op-id <id>] [--json]
+baton gate <request|approve|deny|check|list|open|close> [args...] [--by <actor>] [--risk <tier>] [--reason <msg>] [--status <status>] [--ttl <sec>] [--json]
 
-List, open or close human gates
+Request, approve, deny, check or list risk-tiered human approval gates
 
-Gates are human decisions that block packets until opened. Only the gate owner or "human" may open or close one.
+Gates control risk-tiered operations. Privileged and destructive operations require human or orchestrator approval with immutable action context.
 
 Options:
-      --by <v>     who opens or closes the gate (the owner, or human)
-      --note <v>   reason recorded with the decision
-      --op-id <v>  idempotent operation id
-      --json       
-  -h, --help       show this help
+      --by <v>      actor approving, denying or opening the gate (human or orchestrator)
+      --risk <v>    risk tier (read-only, normal, privileged, destructive)
+      --reason <v>  reason recorded with the request, approval or denial
+      --status <v>  filter gate list by lifecycle status (REQUESTED, APPROVED, DENIED, EXPIRED, CANCELLED)
+      --ttl <n>     time-to-live in seconds before the approval expires
+      --note <v>    alias for reason (for backwards compatibility)
+      --op-id <v>   idempotent operation id
+      --json        print output as JSON
+  -h, --help        show this help
 
 Examples:
-  baton gate list
+  baton gate request deploy production --risk destructive --reason "Production release"
+  baton gate approve GATE-001 --by human
+  baton gate deny GATE-001 --by human --reason "Unverified migration"
+  baton gate check GATE-001
+  baton gate list --status REQUESTED
   baton gate open G1 --by human --note "key provisioned"
 ```
 
@@ -879,7 +887,7 @@ Planning:
   assign     Fill missing authors and reviewers deterministically
   check      Validate plan, ownership, dependencies, ledger integrity and leases
   digest     What changed since the last digest, plus what needs attention
-  gate       List, open or close human gates
+  gate       Request, approve, deny, check or list risk-tiered human approval gates
   next       What an agent should do next, in strict order
   plan       Show, validate, edit, import or graph the plan
   prompt     Print a role prompt with project variables filled in

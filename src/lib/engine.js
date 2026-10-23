@@ -54,7 +54,7 @@ export function initialState(plan) {
   for (const p of plan.packets) packets[p.id] = freshPacketState(p);
   const gates = {};
   for (const g of plan.gates || []) gates[g.id] = { id: g.id, title: g.title ?? '', owner: g.owner ?? 'human', open: g.open === true, by: null, ts: null, note: '' };
-  return { packets, gates };
+  return { packets, gates, approvals: {} };
 }
 
 /** Apply one event to a state object in place (also used by scores and audits). */
@@ -63,6 +63,33 @@ export function applyEvent(state, ev) {
   if (ev.kind === 'gate') {
     const g = state.gates[data.gate];
     if (g) Object.assign(g, { open: !!data.open, by: ev.by, ts: ev.ts, note: ev.note || '' });
+    return;
+  }
+  if (ev.kind === 'approval') {
+    if (!state.approvals) state.approvals = {};
+    const id = data.gate_id;
+    if (id) {
+      const prior = state.approvals[id] || {};
+      state.approvals[id] = {
+        ...prior,
+        id,
+        gate_id: id,
+        action: data.action ?? prior.action,
+        target: data.target ?? prior.target,
+        risk: data.risk ?? prior.risk,
+        status: data.status ?? prior.status,
+        session_id: data.session_id ?? prior.session_id,
+        commit: data.commit ?? prior.commit,
+        reason: data.reason ?? prior.reason ?? ev.note ?? '',
+        requested_by: prior.requested_by ?? (data.status === 'REQUESTED' ? ev.by : null),
+        approver: data.approver ?? (['APPROVED', 'DENIED'].includes(data.status) ? ev.by : prior.approver),
+        expires_at: data.expires_at ?? prior.expires_at ?? null,
+        created_at: prior.created_at ?? ev.ts,
+        updated_at: ev.ts,
+        context_sha: data.context_sha ?? prior.context_sha,
+        last_event: ev.id,
+      };
+    }
     return;
   }
   const s = state.packets[ev.packet];
@@ -1237,3 +1264,16 @@ export function reconcileOperations(root) {
 }
 
 export { patternsOverlap, getAgent };
+export {
+  RISK_TIERS,
+  APPROVAL_STATUSES,
+  classifyOperation,
+  getApprovalStatus,
+  requestGate,
+  approveGate,
+  denyGate,
+  checkGate,
+  assertGateApproved,
+  assertOperationPermitted,
+  listGates,
+} from './gate.js';
