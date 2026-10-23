@@ -6,6 +6,8 @@ All notable changes to Agent Baton are documented here. The format follows
 
 ## [Unreleased]
 
+- Hardened tool-call hook guard (`baton guard`) against path traversal edge cases: resolves URL-encoded and double-encoded traversals (`%2e%2e`, `%252e%252e`, `%2500`), maps Windows extended-length and local UNC paths while rejecting device namespaces (`\\?\`, `\\.\`), denies NTFS alternate data streams across all platforms (`file:stream`, `file::$DATA`), canonicalizes directory junctions and symlinks, normalizes redundant trailing dots/spaces/slashes, extracts paths from nested file objects and batched edit arrays, enforces fail-closed behavior for unparsable JSON and unknown payloads in block mode, unconditionally denies protected paths in block mode, and publishes dedicated bypass surface disclosures in `docs/GUARD.md`.
+
 - Added execution identity provenance and session tracking (`resolveExecutionProvenance`); separates caller-asserted actor IDs (`--agent`) from verifiable runner and GitHub identities, stamps tamper-evident session IDs (`sess-*`, `gh-*`) and declared trust levels (`github-verified`, `ci-environment`, `local-unverified`) on ledger events, and enforces `requireActorMatch` in `checkIdentity` to prevent GitHub Actions identity spoofing.
 
 - Introduced least-privilege execution profiles (`read-only`, `workspace-write`, `review-only`, `privileged`); enforced in plan validation and tool-call guard hooks (`baton guard`) to restrict file writes, shell execution and network access. Unauthorized escalation to `privileged` by non-orchestrator agents is rejected, and unsupported OS-level/kernel sandbox requests fail closed with explicit enforcement disclosures.
