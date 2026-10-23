@@ -9,6 +9,37 @@ export const RESERVED_AGENTS = ['human', 'harness'];
 export const AGENT_ID_RE = /^[a-z0-9][a-z0-9_-]*$/;
 export const GUARD_MODES = ['off', 'warn', 'block'];
 
+export const PERMISSION_PROFILES = {
+  'read-only': {
+    description: 'Read-only access; no workspace file modifications, shell or network',
+    allowWrite: false,
+    allowShell: false,
+    allowNetwork: false,
+    privileged: false,
+  },
+  'review-only': {
+    description: 'Reviewer access; only findings and verdict events, no source tree edits',
+    allowWrite: false,
+    allowShell: false,
+    allowNetwork: false,
+    privileged: false,
+  },
+  'workspace-write': {
+    description: 'Standard worker access; scoped writes to owned packet paths',
+    allowWrite: true,
+    allowShell: true,
+    allowNetwork: false,
+    privileged: false,
+  },
+  'privileged': {
+    description: 'Orchestrator and admin access; full plan, config and workspace authority',
+    allowWrite: true,
+    allowShell: true,
+    allowNetwork: true,
+    privileged: true,
+  },
+};
+
 export function configPath(root) { return path.join(root, '.baton', 'config.json'); }
 export function planPath(root) { return path.join(root, '.baton', 'plan.json'); }
 
@@ -111,6 +142,23 @@ export function validateConfig(cfg) {
   if (!isObj(cfg.guard) || !GUARD_MODES.includes(cfg.guard.mode)) errors.push(`config.guard.mode must be one of ${GUARD_MODES.join('|')}`);
   for (const k of ['coordination']) if (!Array.isArray(cfg[k])) errors.push(`config.${k} must be an array`);
   if (!isObj(cfg.protected) || !Array.isArray(cfg.protected.globs)) errors.push('config.protected.globs must be an array');
+  if (cfg.security && isObj(cfg.security)) {
+    if (cfg.security.profiles) {
+      if (!isObj(cfg.security.profiles)) {
+        errors.push('config.security.profiles must be an object');
+      } else {
+        for (const [name, prof] of Object.entries(cfg.security.profiles)) {
+          if (!isObj(prof)) {
+            errors.push(`config.security.profiles.${name} must be an object`);
+            continue;
+          }
+          if (prof.isolation === 'kernel' || prof.isolation === 'network' || prof.sandbox === 'os') {
+            errors.push(`config.security.profiles.${name}: unsupported isolation "${prof.isolation || prof.sandbox}"; Baton runs in user space without kernel/network sandboxing`);
+          }
+        }
+      }
+    }
+  }
   return { errors, warnings };
 }
 

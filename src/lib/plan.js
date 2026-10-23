@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { BatonError } from './errors.js';
 import { readJson, writeJsonAtomic, canonicalJson, sha256, toPosix } from './util.js';
 import { patternsOverlap, matchPath, isProtected } from './glob.js';
-import { planPath } from './config.js';
+import { planPath, PERMISSION_PROFILES } from './config.js';
 
 export const PRIORITIES = ['P0', 'P1', 'P2', 'P3'];
 export const GATE_MODES = ['start', 'live_only'];
@@ -20,7 +20,7 @@ export function idProblem(id) {
   return null;
 }
 
-const PACKET_KEY_ORDER = ['id', 'title', 'track', 'agent', 'reviewer', 'owns', 'reads', 'deps', 'needs_done', 'gate', 'gate_mode',
+const PACKET_KEY_ORDER = ['id', 'title', 'track', 'agent', 'reviewer', 'profile', 'owns', 'reads', 'deps', 'needs_done', 'gate', 'gate_mode',
   'priority', 'milestone', 'stretch', 'test', 'description', 'done_checks'];
 const TRACK_KEY_ORDER = ['id', 'owner', 'theme', 'owns'];
 const GATE_KEY_ORDER = ['id', 'title', 'owner', 'open', 'needed_by'];
@@ -34,6 +34,7 @@ export function normalizePacket(p) {
     track: p.track ?? null,
     agent: p.agent ?? null,
     reviewer: p.reviewer ?? null,
+    profile: p.profile ?? 'workspace-write',
     owns: Array.isArray(p.owns) ? p.owns : [],
     reads: Array.isArray(p.reads) ? p.reads : [],
     deps: Array.isArray(p.deps) ? p.deps : [],
@@ -261,6 +262,21 @@ export function validatePlan(plan, config, { done = [] } = {}) {
     if (p.agent && p.reviewer && p.agent === p.reviewer && config.requireDifferentReviewer !== false) errors.push(at('reviewer equals author'));
     if (!PRIORITIES.includes(p.priority)) errors.push(at(`priority must be one of ${PRIORITIES.join('|')}`));
     if (!GATE_MODES.includes(p.gate_mode)) errors.push(at(`gate_mode must be one of ${GATE_MODES.join('|')}`));
+    const allowedProfiles = { ...PERMISSION_PROFILES, ...(config.security?.profiles || {}) };
+    if (!allowedProfiles[p.profile]) {
+      errors.push(at(`unknown permission profile "${p.profile}"`));
+    } else {
+      const prof = allowedProfiles[p.profile];
+      if (prof.privileged && p.agent && p.agent !== config.orchestrator && p.agent !== 'human') {
+        const ag = config.agents?.find((a) => a.id === p.agent);
+        if (!ag?.roles?.includes('orchestrator')) {
+          errors.push(at(`unauthorized profile escalation: agent "${p.agent}" lacks orchestrator role required for privileged profile`));
+        }
+      }
+      if (p.profile === 'review-only' && p.agent) {
+        warnings.push(at(`review-only profile restricts agent "${p.agent}" from modifying workspace files`));
+      }
+    }
     if (p.gate && !gateIds.has(p.gate)) errors.push(at(`unknown gate ${p.gate}`));
     if (p.milestone && pl.milestones.length && !milestoneIds.has(p.milestone)) errors.push(at(`unknown milestone ${p.milestone}`));
     if (typeof p.stretch !== 'boolean') errors.push(at('stretch must be boolean'));
