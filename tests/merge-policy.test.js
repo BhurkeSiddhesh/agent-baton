@@ -12,6 +12,8 @@ import { verifyMarkerPath } from '../src/lib/engine.js';
 delete process.env.BATON_AGENT;
 delete process.env.BATON_ROOT;
 delete process.env.BATON_NOW;
+delete process.env.GITHUB_ACTIONS;
+delete process.env.GITHUB_ACTOR;
 
 const repos = [];
 const originalEnv = { ...process.env };
@@ -32,7 +34,7 @@ function repo(opts = {}) {
 async function cli(cwd, args, envOver = {}) {
   const stdout = memoryStream();
   const stderr = memoryStream();
-  const env = { ...process.env, ...envOver };
+  const env = { ...process.env, GITHUB_ACTIONS: '', GITHUB_ACTOR: '', ...envOver };
   const status = await main(args, { cwd, env, stdout, stderr });
   return { status, stdout: stdout.text(), stderr: stderr.text() };
 }
