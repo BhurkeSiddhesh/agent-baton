@@ -6,7 +6,7 @@ Start with `baton doctor`: it checks Node, git, config, plan, the test command, 
 ledger integrity, agent CLIs and the guard hook, and exits 1 on errors. Then `baton check`. Add `--json` to either for
 machine-readable output. Messages below are quoted from the tool.
 
-Consult [tested platform compatibility](COMPATIBILITY.md) for Node/OS coverage, Windows shell reproduction and limitations around extended paths and Git version baselines.
+Consult [tested platform compatibility](COMPATIBILITY.md) for Node/OS coverage, the certified Git 2.30 lane, Windows shell reproduction and the precise limits of extended-path coverage.
 
 ## Installation
 

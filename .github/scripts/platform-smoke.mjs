@@ -26,6 +26,17 @@ try {
   const rel = path.join('src with spaces', 'café', 'line-ending.md');
   fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
   fs.writeFileSync(path.join(root, rel), 'before\r\nafter\r\n', 'utf8');
+  let longRel = null;
+  if (process.platform === 'win32') {
+    const parts = [];
+    while (path.join(root, ...parts, 'long-path.txt').length <= 280) {
+      parts.push(`segment-${String(parts.length + 1).padStart(2, '0')}-abcdefghij`);
+    }
+    longRel = path.join(...parts, 'long-path.txt');
+    fs.mkdirSync(path.dirname(path.join(root, longRel)), { recursive: true });
+    fs.writeFileSync(path.join(root, longRel), 'windows extended path\r\n', 'utf8');
+    if (path.join(root, longRel).length <= 260) throw new Error('long-path fixture did not exceed 260 characters');
+  }
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({
     name: 'platform-smoke', private: true, scripts: { test: 'node -e "process.exit(0)"' },
   }));
@@ -38,6 +49,9 @@ try {
   const status = JSON.parse(run(process.execPath, [baton, 'status', '--json']));
   if (!status || typeof status !== 'object') throw new Error('status JSON not an object');
   if (fs.readFileSync(path.join(root, rel), 'utf8') !== 'before\r\nafter\r\n') throw new Error('CRLF or Unicode fixture was altered');
+  if (longRel && fs.readFileSync(path.join(root, longRel), 'utf8') !== 'windows extended path\r\n') {
+    throw new Error('Windows extended-path fixture was altered');
+  }
   console.log(`PASS: ${process.platform} Node ${process.version}, ${run('git', ['--version'])}`);
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
