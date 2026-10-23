@@ -56,6 +56,9 @@ export function validateEventSchema(ev, { allowLegacy = true } = {}) {
   if (!(ev.sig == null || (isObject(ev.sig) && string(ev.sig.alg) && string(ev.sig.key) && string(ev.sig.sig)))) {
     problems.push('sig must be an object with alg, key, sig when present');
   }
+  if (!(ev.prov == null || (isObject(ev.prov) && string(ev.prov.session) && string(ev.prov.trust)))) {
+    problems.push('prov must be an object with session and trust when present');
+  }
   if (packetKinds.has(ev.kind) && !string(ev.packet)) problems.push(`${ev.kind}.packet is required`);
   if (transitionKinds.has(ev.kind) && !string(ev.to)) problems.push(`${ev.kind}.to is required`);
   if (!string(ev.by)) problems.push(`${ev.kind || 'event'}.by is required`);

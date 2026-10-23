@@ -35,6 +35,7 @@ export async function run(ctx, args) {
     force,
     preserve,
     worktreeDir,
+    env: ctx.env,
   });
 
   const targetAgent = reassign || agent;

@@ -19,7 +19,7 @@ export async function run(ctx, args) {
   const agent = ctx.agent(args.agent);
   const expectedRev = args['expected-rev'] != null ? Number(args['expected-rev']) : null;
   const opId = args['op-id'] || null;
-  const r = begin(ctx.root, pid, agent, { pull: args.pull, expectedRev, opId });
+  const r = begin(ctx.root, pid, agent, { pull: args.pull, expectedRev, opId, env: ctx.env });
   if (args.json) {
     ctx.json({ packet: pid, agent, status: 'IN_PROGRESS', leaseUntil: r.leaseUntil, base: r.base, owns: r.owns, rework: r.rework, pulledEarly: r.pulledEarly, confirmed: true });
     return 0;

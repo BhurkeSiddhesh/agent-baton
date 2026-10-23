@@ -259,10 +259,18 @@ export function nextFor(agent, plan, state, { config = {}, now = utcnow() } = {}
 
 // ------------------------------------------------------------------ identity
 
-/** If BATON_AGENT is set, commands may only act as that agent. */
-export function checkIdentity(claimed, env = process.env) {
-  const me = env.BATON_AGENT;
+/** If BATON_AGENT is set, commands may only act as that agent. Enforces actor-match in GitHub Actions when configured. */
+export function checkIdentity(claimed, env = process.env, config = null) {
+  const me = env?.BATON_AGENT;
   if (me && claimed && me !== claimed) throw new BatonError(`BATON_AGENT=${me} but the command acts as ${claimed}`, { code: 'IDENTITY' });
+  if (config?.security?.requireActorMatch && env?.GITHUB_ACTIONS === 'true' && env?.GITHUB_ACTOR) {
+    const ag = getAgent(config, claimed);
+    if (ag?.github && env.GITHUB_ACTOR.toLowerCase() !== ag.github.toLowerCase()) {
+      throw new BatonError(`GitHub actor "${env.GITHUB_ACTOR}" does not match assigned agent "${claimed}" (expected GitHub username "${ag.github}")`, {
+        code: 'IDENTITY_MISMATCH',
+      });
+    }
+  }
 }
 
 function requireActor(config, id, what = 'actor') {
@@ -360,14 +368,14 @@ export function postMessage(root, { from, to = 'all', type, text, packet = null,
  * @param {string} to target status
  * @param {{by?: string|null, note?: string, kind?: string, data?: object}} [opts] kind "begin" is required for IN_PROGRESS
  */
-export function transition(root, pid, to, { by = null, note = '', kind = 'status', data = {}, opId = null } = {}) {
+export function transition(root, pid, to, { by = null, note = '', kind = 'status', data = {}, opId = null, env = process.env } = {}) {
   return withLock(stateDir(root), () => {
     const { config, plan, state } = load(root);
     if (['ACCEPTED', 'ACCEPTED_WITH_FIXES', 'READY_FOR_REVIEW'].includes(to)) {
       assertSensitiveReplay(root, { packet: pid, action: `transition to ${to}`, config });
     }
     const p = getPacket(plan, pid);
-    checkIdentity(by);
+    checkIdentity(by, env, config);
     const s = state.packets[pid];
     const old = s.status;
     if (!STATUSES.includes(to)) throw new BatonError(`invalid status ${to}`, { code: 'BAD_STATUS' });
@@ -446,11 +454,11 @@ function requireWorker(config, agent) {
  * Start (or restart) work: lease + snapshot + claim message. IN_PROGRESS is reachable only through here.
  * @returns {{event: object, pulledEarly: boolean, rework: boolean, owns: string[], leaseUntil: string, base: string|null}}
  */
-export function begin(root, pid, agent, { pull = false, expectedRev = null, opId = null } = {}) {
+export function begin(root, pid, agent, { pull = false, expectedRev = null, opId = null, env = process.env } = {}) {
   return withLock(stateDir(root), () => {
     const { config, plan, state } = load(root);
     const p = getPacket(plan, pid);
-    checkIdentity(agent);
+    checkIdentity(agent, env, config);
     requireWorker(config, agent);
     if (opId) {
       const existing = findOperationEvents(readEvents(root), opId);
@@ -503,7 +511,7 @@ export function begin(root, pid, agent, { pull = false, expectedRev = null, opId
     for (const d of p.deps) if (state.packets[d]) depCommits[d] = state.packets[d].commit || 'unbuilt';
     const base = rework && s.base ? s.base : headCommit(root);
     const event = transition(root, pid, 'IN_PROGRESS', {
-      by: agent, kind: 'begin', opId, note: pulled ? 'pulled early' : rework ? 'rework' : '',
+      by: agent, kind: 'begin', opId, env, note: pulled ? 'pulled early' : rework ? 'rework' : '',
       data: { base, lease_until: lease, lease_token: nextToken, dep_commits: depCommits, ...(expectedRev != null ? { expected_rev: expectedRev } : {}) },
     });
     clearVerifyMarker(root, pid);
@@ -539,11 +547,11 @@ export function heartbeat(root, pid, agent) {
 }
 
 /** Take over an IN_PROGRESS packet whose lease expired or process confirmed crashed. */
-export function reclaim(root, pid, agent, { opId = null, reassign = null, crashedPid = null, force = false, preserve = true, worktreeDir = null } = {}) {
+export function reclaim(root, pid, agent, { opId = null, reassign = null, crashedPid = null, force = false, preserve = true, worktreeDir = null, env = process.env } = {}) {
   return withLock(stateDir(root), () => {
     const { config, plan, state } = load(root);
     const p = getPacket(plan, pid);
-    checkIdentity(agent);
+    checkIdentity(agent, env, config);
     const newAgent = reassign || agent;
     if (reassign) {
       requireActor(config, agent, 'agent');
@@ -1024,6 +1032,12 @@ export function auditEvents(plan, events, config = {}) {
     if (ev.kind === 'verdict') {
       if (ev.by !== s.reviewer) bad(ev, `verdict on ${ev.packet} by ${ev.by}; the reviewer is ${s.reviewer}`);
       if (config.requireDifferentReviewer !== false && s.contributors.includes(ev.by)) bad(ev, `verdict on ${ev.packet} by a contributor (${ev.by})`);
+      if (ev.prov?.gh?.actor) {
+        const revAgent = getAgent(config, s.reviewer);
+        if (revAgent?.github && ev.prov.gh.actor.toLowerCase() !== revAgent.github.toLowerCase()) {
+          bad(ev, `verdict on ${ev.packet} has identity mismatch: GitHub actor "${ev.prov.gh.actor}" does not match reviewer "${s.reviewer}" (${revAgent.github})`);
+        }
+      }
     }
     applyEvent(state, ev);
   }

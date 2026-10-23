@@ -64,11 +64,13 @@ export function findRoot(cwd = process.cwd(), env = process.env) {
 
 function normAgent(a) {
   return {
+    ...a,
     id: a.id,
     name: a.name ?? a.id,
     kind: a.kind ?? 'custom',
     roles: Array.isArray(a.roles) ? a.roles : ['worker', 'reviewer'],
     strengths: Array.isArray(a.strengths) ? a.strengths : [],
+    github: a.github ?? null,
   };
 }
 
