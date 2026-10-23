@@ -4,6 +4,7 @@ import path from 'node:path';
 import { BatonError, UsageError } from '../lib/errors.js';
 import { ownedBy, isProtected, isCoordination, normPath } from '../lib/glob.js';
 import { toPosix } from '../lib/util.js';
+import { PERMISSION_PROFILES } from '../lib/config.js';
 
 export const name = 'guard';
 export const group = 'Execution';
@@ -158,6 +159,9 @@ export async function run(ctx, args) {
   let loaded;
   try { loaded = ctx.loadState(); } catch (e) {
     if (e instanceof BatonError && e.code === 'NOT_INIT') return respond(true);
+    if (e instanceof BatonError && e.code === 'BAD_CONFIG' && e.message.includes('unsupported isolation')) {
+      return respond(false, `baton guard: blocked: unsupported enforcement requested. ${e.message}`, 'block');
+    }
     throw e;
   }
   const { config, plan, state } = loaded;
@@ -169,11 +173,51 @@ export async function run(ctx, args) {
   try { payload = raw.trim() ? JSON.parse(raw) : null; } catch { payload = undefined; }
   if (payload === undefined) return respond(true, 'baton guard: stdin is not valid JSON; allowing (fail open)', 'warn');
   if (!payload) return respond(true);
+
+  const agent = ctx.agent(args.agent, { required: false });
+  const mine = agent ? plan.packets.filter((p) => state.packets[p.id]?.status === 'IN_PROGRESS' && state.packets[p.id]?.by === agent).map((p) => p.id) : [];
+
+  // Resolve active execution permission profile
+  let profileName = 'workspace-write';
+  if (mine.length) {
+    profileName = plan.packets.find((p) => p.id === mine[0])?.profile || 'workspace-write';
+  } else if (agent === config.orchestrator || agent === 'human') {
+    profileName = 'privileged';
+  } else if (agent) {
+    const ag = config.agents?.find((a) => a.id === agent);
+    profileName = ag?.profile || (ag?.roles?.includes('worker') ? 'workspace-write' : 'review-only');
+  }
+  const profiles = { ...PERMISSION_PROFILES, ...(config.security?.profiles || {}) };
+  const profile = profiles[profileName] || PERMISSION_PROFILES['workspace-write'];
+
+  // Explicit refusal for unsupported kernel/network sandbox enforcement
+  if (profile.isolation === 'kernel' || profile.isolation === 'network' || profile.sandbox === 'os') {
+    return respond(false, `baton guard: blocked: unsupported enforcement requested by profile "${profileName}". Baton operates in user space and does not provide OS kernel or network sandboxing.`, 'block');
+  }
+
+  // Check execution capabilities (shell and network tools)
+  const toolName = String(payload.tool_name || payload.toolName || payload.tool || '').toLowerCase();
+  const isShellTool = ['bash', 'terminal', 'sh', 'exec', 'powershell', 'cmd'].includes(toolName)
+    || typeof payload.tool_input?.command === 'string'
+    || typeof payload.command === 'string';
+  if (isShellTool && profile.allowShell === false) {
+    return respond(false, `baton guard: blocked: ${agent || 'agent'} operates under "${profileName}" profile which forbids shell execution.`, mode);
+  }
+
+  const isNetworkTool = ['curl', 'fetch', 'download', 'wget', 'network'].includes(toolName)
+    || payload.network === true
+    || payload.tool_input?.network === true;
+  if (isNetworkTool && profile.allowNetwork === false) {
+    return respond(false, `baton guard: blocked: ${agent || 'agent'} operates under "${profileName}" profile which forbids network access.`, mode);
+  }
+
   const paths = extractPaths(payload);
   if (!paths.length) return respond(true); // not a file tool (Bash, Read, ...)
 
-  const agent = ctx.agent(args.agent, { required: false });
-  const mine = agent ? plan.packets.filter((p) => state.packets[p.id].status === 'IN_PROGRESS' && state.packets[p.id].by === agent).map((p) => p.id) : [];
+  if (profile.allowWrite === false) {
+    return respond(false, `baton guard: blocked: ${agent || 'agent'} operates under "${profileName}" profile which forbids workspace file modifications.`, mode);
+  }
+
   const baseDir = typeof payload.cwd === 'string' && path.isAbsolute(payload.cwd) ? payload.cwd : ctx.cwd;
   const dctx = { config, plan, agent, mine };
 

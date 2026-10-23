@@ -87,6 +87,7 @@ Opening and closing are recorded as `gate` events; the live state is derived, no
 | `track` | no | must exist in `tracks` |
 | `agent` | no | author; `baton assign` can fill it |
 | `reviewer` | no | must differ from `agent` when `requireDifferentReviewer` is true; must have the reviewer role |
+| `profile` | no | permission profile (`workspace-write`, `read-only`, `review-only`, `privileged`); default `workspace-write`. `privileged` requires orchestrator role |
 | `owns` | yes | non-empty list of repo-relative files or directories (trailing `/` means a directory) |
 | `reads` | no | files worth reading first; not enforced |
 | `deps` | no | packet ids; same-track deps block starting until they are in review or accepted; cross-track deps flag `AT_RISK` |
