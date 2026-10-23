@@ -59,7 +59,7 @@ shorthand for `node .baton/runtime/bin/baton.js` (or `npx agent-baton` outside a
 |---|---|
 | [`begin`](#baton-begin) | Start (or restart) a packet: lease, snapshot and claim |
 | [`heartbeat`](#baton-heartbeat) | Extend the lease of your in-progress packet |
-| [`reclaim`](#baton-reclaim) | Take over an in-progress packet whose lease expired |
+| [`reclaim`](#baton-reclaim) | Take over an in-progress packet whose lease expired or process crashed |
 | [`block`](#baton-block) | Mark a packet BLOCKED with a reason and a question |
 | [`verify`](#baton-verify) | Scope guard, secret scan and tests; writes the verify marker |
 | [`submit`](#baton-submit) | Request review (needs a current passing verify) |
@@ -505,15 +505,20 @@ Options:
 ### baton reclaim
 
 ```text
-baton reclaim <packet> --agent <id> [--op-id <id>] [--json]
+baton reclaim <packet> --agent <id> [--reassign <id>] [--crashed-pid <pid>] [--no-preserve] [--force] [--worktree-dir <dir>] [--op-id <id>] [--json]
 
-Take over an in-progress packet whose lease expired
+Take over an in-progress packet whose lease expired or process crashed
 
 Options:
-  -a, --agent <v>  acting agent id (or BATON_AGENT)
-      --op-id <v>  idempotent operation id
-      --json       print a JSON document
-  -h, --help       show this help
+  -a, --agent <v>         acting agent id (or BATON_AGENT)
+      --reassign <v>      reassign to a different agent during reclaim
+      --crashed-pid <n>   PID of suspected crashed agent process to verify
+      --preserve          preserve uncommitted work and create a rescue ref (default: true)
+      --force             force reclaim even if process status cannot be determined
+      --worktree-dir <v>  explicit worktree directory to preserve
+      --op-id <v>         idempotent operation id
+      --json              print a JSON document
+  -h, --help              show this help
 ```
 
 ### baton block
@@ -854,7 +859,7 @@ Execution:
   ledger     Import, export and verify the event ledger
   merge      Fast-forward main to an ACCEPTED packet commit (never creates merge commits)
   reassign   Change the reviewer of an undecided packet (orchestrator)
-  reclaim    Take over an in-progress packet whose lease expired
+  reclaim    Take over an in-progress packet whose lease expired or process crashed
   reject     Reject a reviewed packet (needs a note or at least one finding)
   review     Reviewer brief: packet, done checks, verify result, changed files, findings
   submit     Request review (needs a current passing verify)

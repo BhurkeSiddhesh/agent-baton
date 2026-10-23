@@ -200,3 +200,14 @@ export function levenshtein(a, b) {
   }
   return dp[a.length][b.length];
 }
+
+/** Check if a process ID is currently running on the system. */
+export function isProcessAlive(pid) {
+  if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === 'EPERM';
+  }
+}

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { toPosix } from './util.js';
+import { toPosix, slugify } from './util.js';
 
 /**
  * Run git without a shell. Returns {status, stdout, stderr} or null when git cannot be spawned.
@@ -132,4 +132,32 @@ export function listWorktrees(root) {
     if (row.path) rows.push(row);
   }
   return rows;
+}
+
+/**
+ * Creates a permanent rescue git ref preserving any uncommitted changes (index + worktree)
+ * without clearing or altering the working directory.
+ * @param {string} root Git repository or worktree root
+ * @param {string} [label] Label used for commit message and ref naming
+ * @returns {{preserved: boolean, ref: string|null, sha: string|null, dirty: boolean}}
+ */
+export function preserveGitWork(root, label = 'rescue') {
+  if (!isGit(root)) return { preserved: false, ref: null, sha: null, dirty: false };
+  const dirty = isDirty(root, { exclude: ['.baton/ledger', '.baton/state', '.baton/views'] });
+  if (!dirty) {
+    return { preserved: false, ref: null, sha: headCommit(root), dirty: false };
+  }
+  const cleanLabel = slugify(label);
+  // Stage all changes (excluding .baton) so untracked files are captured by stash create
+  git(root, ['add', '-A', '--', ':!.baton']);
+  const out = gitOut(root, ['stash', 'create', `baton rescue: ${label}`]);
+  // Reset index to HEAD so working copy remains uncommitted and untouched
+  git(root, ['reset', 'HEAD', '--quiet']);
+  if (!out) {
+    return { preserved: false, ref: null, sha: null, dirty: true };
+  }
+  const sha = out.trim();
+  const ref = `refs/baton/rescue/${cleanLabel}`;
+  git(root, ['update-ref', ref, sha]);
+  return { preserved: true, ref, sha, dirty: true };
 }

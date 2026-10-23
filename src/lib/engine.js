@@ -1,13 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { BatonError } from './errors.js';
-import { utcnow, stamp, addHours, parseTime, daysUntil, readJson, writeJsonAtomic, assertInside } from './util.js';
+import { utcnow, stamp, addHours, parseTime, daysUntil, readJson, writeJsonAtomic, assertInside, isProcessAlive } from './util.js';
 import { loadConfig, hasRole, getAgent, isKnownActor, RESERVED_AGENTS } from './config.js';
 import { loadPlan, packetsOverlap } from './plan.js';
 import { patternsOverlap, BUILTIN_COORDINATION } from './glob.js';
 import { appendEvent, readEvents, stateDir, stateSub, EVENT_KINDS, assertSensitiveReplay } from './store.js';
 import { withLock } from './lock.js';
-import { headCommit, isDirty } from './git.js';
+import { headCommit, isDirty, preserveGitWork, listWorktrees } from './git.js';
 import { saveSnapshot, packetFingerprint } from './snapshot.js';
 import { fingerprint } from './util.js';
 
@@ -538,43 +538,122 @@ export function heartbeat(root, pid, agent) {
   });
 }
 
-/** Take over an IN_PROGRESS packet whose lease expired. */
-export function reclaim(root, pid, agent, { opId = null } = {}) {
+/** Take over an IN_PROGRESS packet whose lease expired or process confirmed crashed. */
+export function reclaim(root, pid, agent, { opId = null, reassign = null, crashedPid = null, force = false, preserve = true, worktreeDir = null } = {}) {
   return withLock(stateDir(root), () => {
     const { config, plan, state } = load(root);
-    getPacket(plan, pid);
+    const p = getPacket(plan, pid);
     checkIdentity(agent);
-    requireWorker(config, agent);
+    const newAgent = reassign || agent;
+    if (reassign) {
+      requireActor(config, agent, 'agent');
+      requireWorker(config, reassign);
+    } else {
+      requireWorker(config, agent);
+    }
     if (opId) {
       const existing = findOperationEvents(readEvents(root), opId);
-      const begEv = existing.find((e) => e.packet === pid && e.kind === 'begin' && e.by === agent);
+      const begEv = existing.find((e) => e.packet === pid && e.kind === 'begin' && e.by === newAgent);
       if (begEv) {
         const hasMsg = existing.some((e) => e.kind === 'message' && e.data?.type === 'NOTICE');
         if (!hasMsg) {
           appendEvent(root, {
-            packet: pid, kind: 'message', by: agent, op_id: opId,
+            packet: pid, kind: 'message', by: newAgent, op_id: opId,
             data: { type: 'NOTICE', to: 'all', text: `${pid} reclaimed (lease token ${begEv.data?.lease_token || 1})` },
           });
         }
-        return { event: begEv, leaseUntil: begEv.data.lease_until, leaseToken: begEv.data.lease_token || 1, idempotent: true };
+        return {
+          event: begEv,
+          leaseUntil: begEv.data.lease_until,
+          leaseToken: begEv.data.lease_token || 1,
+          recoveredFrom: begEv.data.recovered_from || null,
+          rescueRef: begEv.data.rescue_ref || null,
+          idempotent: true,
+        };
       }
     }
     const s = state.packets[pid];
+    if (!s || s.status !== 'IN_PROGRESS') {
+      throw new BatonError(`${pid} is ${s?.status || 'unknown'}; only IN_PROGRESS packets can be reclaimed`, { code: 'NOT_IN_PROGRESS' });
+    }
+    let confirmedCrashed = false;
+    if (crashedPid != null) {
+      if (isProcessAlive(crashedPid)) {
+        throw new BatonError(`process ${crashedPid} is still alive; cannot reclaim ${pid} as crashed`, {
+          code: 'PROCESS_ALIVE', hint: 'wait for the process to exit or lease to expire',
+        });
+      }
+      confirmedCrashed = true;
+    }
     const f = flags(pid, plan, state, { config });
-    if (!f.includes('STALE') && !f.includes('NO_LEASE')) throw new BatonError(`${pid} is not stale (lease until ${s.leaseUntil})`, { code: 'NOT_STALE', hint: `wait for the lease to expire, or ask ${s.by} to hand it off` });
-    if (agent === s.reviewer) throw new BatonError(`${agent} is the reviewer of ${pid} and cannot work on it`, { code: 'REVIEWER_CONFLICT' });
+    if (!f.includes('STALE') && !f.includes('NO_LEASE') && !confirmedCrashed && !force) {
+      throw new BatonError(`${pid} is not stale (lease until ${s.leaseUntil})`, {
+        code: 'NOT_STALE',
+        hint: `wait for the lease to expire, verify crashed PID with --crashed-pid, or ask ${s.by} to hand it off`,
+      });
+    }
+    if (newAgent === s.reviewer) {
+      throw new BatonError(`${newAgent} is the reviewer of ${pid} and cannot work on it`, { code: 'REVIEWER_CONFLICT' });
+    }
+
+    // Preserve dirty changes and uncommitted work
+    let rescueData = { preserved: false, ref: null, sha: null };
+    if (preserve) {
+      let targetDir = worktreeDir;
+      if (!targetDir && p.track) {
+        const wts = listWorktrees(root);
+        const prefix = config.branches?.trackPrefix || 'track/';
+        const trackBranch = plan.tracks?.find((t) => t.id === p.track)?.branch || `${prefix}${p.track}`;
+        const match = wts.find((w) => w.branch === trackBranch);
+        if (match && fs.existsSync(match.path)) targetDir = match.path;
+      }
+      targetDir = targetDir || root;
+      try {
+        rescueData = preserveGitWork(targetDir, `${pid}-${s.by}-${Date.now()}`);
+      } catch {
+        // non-fatal if git preservation fails
+      }
+    }
+
     const lease = leaseUntil(config);
     const oldToken = s.leaseToken || 1;
     const nextToken = oldToken + 1;
+
+    // Invalidate stale verify marker so old tests cannot authorize submit
+    clearVerifyMarker(root, pid);
+    saveSnapshot(root, pid, newAgent);
+
     const event = appendEvent(root, {
-      packet: pid, kind: 'begin', to: 'IN_PROGRESS', by: agent, op_id: opId, note: `reclaimed from ${s.by}`,
-      data: { base: s.base, lease_until: lease, lease_token: nextToken, dep_commits: s.depCommits },
+      packet: pid, kind: 'begin', to: 'IN_PROGRESS', by: newAgent, op_id: opId,
+      note: reassign ? `reclaimed from ${s.by} and reassigned to ${newAgent}` : `reclaimed from ${s.by}`,
+      data: {
+        base: s.base,
+        lease_until: lease,
+        lease_token: nextToken,
+        dep_commits: s.depCommits,
+        recovered_from: s.by,
+        recovery_mode: reassign ? 'reassign' : 'resume',
+        ...(confirmedCrashed ? { crashed_pid: crashedPid } : {}),
+        ...(rescueData.ref ? { rescue_ref: rescueData.ref, rescue_sha: rescueData.sha } : {}),
+      },
     });
+
+    const rescueMsg = rescueData.ref ? `; work preserved at ${rescueData.ref}` : '';
     appendEvent(root, {
-      packet: pid, kind: 'message', by: agent, op_id: opId,
-      data: { type: 'NOTICE', to: 'all', text: `${pid} reclaimed from ${s.by} (revoking lease token ${oldToken}; new token ${nextToken})` },
+      packet: pid, kind: 'message', by: newAgent, op_id: opId,
+      data: {
+        type: 'NOTICE', to: 'all',
+        text: `${pid} reclaimed from ${s.by} by ${newAgent} (revoking lease token ${oldToken}; new token ${nextToken})${rescueMsg}. Fresh verification required before submit.`,
+      },
     });
-    return { event, leaseUntil: lease, leaseToken: nextToken };
+
+    return {
+      event,
+      leaseUntil: lease,
+      leaseToken: nextToken,
+      recoveredFrom: s.by,
+      rescueRef: rescueData.ref || null,
+    };
   });
 }
 
@@ -777,6 +856,9 @@ export function handoff(root, pid, { to, by, note = '', opId = null }) {
         }
         return hndEv;
       }
+    }
+    if (s.status === 'IN_PROGRESS') {
+      clearVerifyMarker(root, pid);
     }
     const event = appendEvent(root, {
       packet: pid, kind: 'handoff', to: s.status === 'IN_PROGRESS' ? 'BLOCKED' : null, by, note, op_id: opId,
