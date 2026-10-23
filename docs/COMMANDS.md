@@ -748,7 +748,7 @@ Reads a tool-call JSON from stdin (tool_input.file_path | path | file), finds th
 by config.guard.mode: off (always allow), warn (allow, print a warning), block (exit 2 with a message on stderr).
 Coordination paths and files owned by the agent's packets are always allowed; protected paths are never allowed in block mode.
 Paths are resolved (.., absolute, backslashes, symlinks) and compared case-insensitively. Paths outside the repository are not guarded.
-Unparsable input fails open with a warning.
+In block mode, unparsable JSON and unknown payload shapes fail closed (exit 2). In warn mode, they fail open with a warning on stderr.
 
 Options:
   -a, --agent <v>  acting agent id (or BATON_AGENT)
