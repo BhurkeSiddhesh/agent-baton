@@ -1,0 +1,705 @@
+{
+  "version": 1,
+  "description": "Machine-readable capability matrix for Agent Baton adapters",
+  "lastUpdated": "2026-10-23",
+  "schema": {
+    "adapterFields": [
+      "id",
+      "name",
+      "vendor",
+      "category",
+      "executionType",
+      "isUnattendedDaemon",
+      "instructionSurfaces",
+      "executableRunnerSupport",
+      "roles",
+      "hookEnforcement",
+      "cloudCiReadiness",
+      "offlineCliExecution",
+      "limitations"
+    ]
+  },
+  "adapters": {
+    "claude": {
+      "id": "claude",
+      "name": "Claude Code",
+      "vendor": "Anthropic",
+      "category": "cli-agent",
+      "executionType": "interactive-cli",
+      "isUnattendedDaemon": false,
+      "instructionSurfaces": [
+        "CLAUDE.md",
+        ".claude/commands/baton-plan.md",
+        ".claude/commands/baton-next.md",
+        ".claude/commands/baton-review.md",
+        ".claude/commands/baton-status.md",
+        ".claude/commands/baton-audit.md",
+        ".claude/commands/baton-digest.md",
+        ".claude/skills/baton/SKILL.md"
+      ],
+      "executableRunnerSupport": {
+        "supported": true,
+        "runnerType": "cli",
+        "commandBinary": "claude",
+        "subagentSupport": true
+      },
+      "roles": {
+        "orchestrator": {
+          "supported": true,
+          "template": ".claude/agents/baton-orchestrator.md"
+        },
+        "worker": {
+          "supported": true,
+          "template": ".claude/agents/baton-worker.md"
+        },
+        "reviewer": {
+          "supported": true,
+          "template": ".claude/agents/baton-reviewer.md"
+        },
+        "auditor": {
+          "supported": true,
+          "template": ".claude/agents/baton-auditor.md"
+        }
+      },
+      "hookEnforcement": {
+        "preToolUse": true,
+        "jsonPermissions": false,
+        "shellEnvWrappers": true,
+        "hookDialect": "claude",
+        "hookConfigFile": ".claude/settings.json",
+        "mechanism": "PreToolUse hook matching Edit|Write|MultiEdit executes baton guard --agent claude --hook claude with tool-call JSON on stdin. Exit code 2 + stderr halts tool execution."
+      },
+      "cloudCiReadiness": {
+        "tier": "medium-high",
+        "headlessExecution": true,
+        "ciIntegration": "Headless CLI execution via CI steps when supplied with ANTHROPIC_API_KEY",
+        "notes": "Requires non-interactive invocation flags; interactive prompts must be suppressed in CI."
+      },
+      "offlineCliExecution": {
+        "supported": true,
+        "notes": "Baton ledger, status, guard, verify, and worktree operations are 100% offline. Model inference requires provider API."
+      },
+      "limitations": [
+        "Interactive CLI session by default; does not manage background daemon tasks without external orchestration.",
+        "PreToolUse hook guards file edits; shell commands (Bash) must be restricted via Baton permission profile."
+      ]
+    },
+    "codex": {
+      "id": "codex",
+      "name": "Codex CLI",
+      "vendor": "OpenAI",
+      "category": "cli-agent",
+      "executionType": "scriptable-cli",
+      "isUnattendedDaemon": false,
+      "instructionSurfaces": [
+        "AGENTS.md",
+        ".codex/agents/baton-orchestrator.toml",
+        ".codex/agents/baton-worker.toml",
+        ".codex/agents/baton-reviewer.toml",
+        ".codex/agents/baton-auditor.toml"
+      ],
+      "executableRunnerSupport": {
+        "supported": true,
+        "runnerType": "cli",
+        "commandBinary": "codex",
+        "subagentSupport": true
+      },
+      "roles": {
+        "orchestrator": {
+          "supported": true,
+          "template": ".codex/agents/baton-orchestrator.toml"
+        },
+        "worker": {
+          "supported": true,
+          "template": ".codex/agents/baton-worker.toml"
+        },
+        "reviewer": {
+          "supported": true,
+          "template": ".codex/agents/baton-reviewer.toml"
+        },
+        "auditor": {
+          "supported": true,
+          "template": ".codex/agents/baton-auditor.toml"
+        }
+      },
+      "hookEnforcement": {
+        "preToolUse": false,
+        "jsonPermissions": false,
+        "shellEnvWrappers": true,
+        "hookDialect": "generic",
+        "hookConfigFile": null,
+        "mechanism": "Generic shell/env wrapper (BATON_AGENT=codex baton guard --hook generic) and baton verify gates."
+      },
+      "cloudCiReadiness": {
+        "tier": "high",
+        "headlessExecution": true,
+        "ciIntegration": "Scriptable non-interactive runner with OPENAI_API_KEY in CI pipelines",
+        "notes": "Native headless support makes it well-suited for automated test & fix workflows."
+      },
+      "offlineCliExecution": {
+        "supported": true,
+        "notes": "Baton core is fully offline; Codex CLI commands execute against configured local or remote API endpoint."
+      },
+      "limitations": [
+        "No native PreToolUse hook configuration in standard Codex CLI to intercept tool calls pre-execution; relies on wrapper and verify gates.",
+        "Runs single-pass jobs rather than persistent resident background daemons."
+      ]
+    },
+    "gemini": {
+      "id": "gemini",
+      "name": "Gemini CLI",
+      "vendor": "Google",
+      "category": "cli-agent",
+      "executionType": "interactive-cli",
+      "isUnattendedDaemon": false,
+      "instructionSurfaces": [
+        "GEMINI.md",
+        ".gemini/commands/baton/plan.toml",
+        ".gemini/commands/baton/next.toml",
+        ".gemini/commands/baton/review.toml",
+        ".gemini/commands/baton/status.toml",
+        ".gemini/commands/baton/audit.toml",
+        ".gemini/commands/baton/digest.toml"
+      ],
+      "executableRunnerSupport": {
+        "supported": true,
+        "runnerType": "cli",
+        "commandBinary": "gemini",
+        "subagentSupport": false
+      },
+      "roles": {
+        "orchestrator": {
+          "supported": true,
+          "template": ".gemini/commands/baton/plan.toml"
+        },
+        "worker": {
+          "supported": true,
+          "template": ".gemini/commands/baton/next.toml"
+        },
+        "reviewer": {
+          "supported": true,
+          "template": ".gemini/commands/baton/review.toml"
+        },
+        "auditor": {
+          "supported": true,
+          "template": ".gemini/commands/baton/audit.toml"
+        }
+      },
+      "hookEnforcement": {
+        "preToolUse": false,
+        "jsonPermissions": false,
+        "shellEnvWrappers": true,
+        "hookDialect": "generic",
+        "hookConfigFile": null,
+        "mechanism": "Command-level execution with BATON_AGENT=gemini; verify gate validation on packet submission."
+      },
+      "cloudCiReadiness": {
+        "tier": "medium",
+        "headlessExecution": true,
+        "ciIntegration": "Headless CLI invocation in automated runner environments with GEMINI_API_KEY",
+        "notes": "Command TOML files provide structured shortcuts for baton subcommands."
+      },
+      "offlineCliExecution": {
+        "supported": true,
+        "notes": "Baton operations are completely offline; Gemini model execution queries provider endpoints."
+      },
+      "limitations": [
+        "Lacks native IDE hook interception; relies on verify gates for scope boundary enforcement.",
+        "Interactive CLI orientation; does not manage an autonomous background task loop."
+      ]
+    },
+    "antigravity": {
+      "id": "antigravity",
+      "name": "Google Antigravity",
+      "vendor": "Google DeepMind",
+      "category": "multi-agent-runtime",
+      "executionType": "autonomous-runtime",
+      "isUnattendedDaemon": true,
+      "instructionSurfaces": [
+        ".agent/rules/baton.md",
+        ".agent/workflows/baton-plan.md",
+        ".agent/workflows/baton-next.md",
+        ".agent/workflows/baton-review.md",
+        ".agent/workflows/baton-status.md",
+        ".agent/workflows/baton-audit.md",
+        ".agent/workflows/baton-digest.md",
+        ".agents/skills/baton-orchestrator/SKILL.md",
+        ".agents/skills/baton-worker/SKILL.md",
+        ".agents/skills/baton-reviewer/SKILL.md",
+        ".agents/skills/baton-auditor/SKILL.md"
+      ],
+      "executableRunnerSupport": {
+        "supported": true,
+        "runnerType": "autonomous-ide-runtime",
+        "commandBinary": "antigravity",
+        "subagentSupport": true
+      },
+      "roles": {
+        "orchestrator": {
+          "supported": true,
+          "template": ".agents/skills/baton-orchestrator/SKILL.md"
+        },
+        "worker": {
+          "supported": true,
+          "template": ".agents/skills/baton-worker/SKILL.md"
+        },
+        "reviewer": {
+          "supported": true,
+          "template": ".agents/skills/baton-reviewer/SKILL.md"
+        },
+        "auditor": {
+          "supported": true,
+          "template": ".agents/skills/baton-auditor/SKILL.md"
+        }
+      },
+      "hookEnforcement": {
+        "preToolUse": true,
+        "jsonPermissions": true,
+        "shellEnvWrappers": true,
+        "hookDialect": "generic",
+        "hookConfigFile": ".agent/rules/baton.md",
+        "mechanism": "Constitutional agent rules in .agent/rules/baton.md combined with AGENT_BUS claim enforcement, skill pre-flight validation, and baton guard/verify execution."
+      },
+      "cloudCiReadiness": {
+        "tier": "high",
+        "headlessExecution": true,
+        "ciIntegration": "Containerized agent runtime and headless dispatch supported across cloud environments",
+        "notes": "Native multi-agent coordination matches Baton's decentralized packet dispatch model."
+      },
+      "offlineCliExecution": {
+        "supported": true,
+        "notes": "Baton coordination, ledger state, and verification are 100% offline."
+      },
+      "limitations": [
+        "Advanced multi-agent features require full Antigravity environment supporting subagent invocations.",
+        "Tool permission gates enforce Baton boundaries within the active workspace session."
+      ]
+    },
+    "cursor": {
+      "id": "cursor",
+      "name": "Cursor",
+      "vendor": "Anysphere",
+      "category": "ide-extension",
+      "executionType": "editor-assisted",
+      "isUnattendedDaemon": false,
+      "instructionSurfaces": [
+        ".cursor/rules/baton.mdc",
+        ".cursor/commands/baton-plan.md",
+        ".cursor/commands/baton-next.md",
+        ".cursor/commands/baton-review.md",
+        ".cursor/commands/baton-status.md",
+        ".cursor/commands/baton-audit.md",
+        ".cursor/commands/baton-digest.md"
+      ],
+      "executableRunnerSupport": {
+        "supported": false,
+        "runnerType": "ide-editor",
+        "commandBinary": "cursor",
+        "subagentSupport": false
+      },
+      "roles": {
+        "orchestrator": {
+          "supported": true,
+          "template": ".cursor/commands/baton-plan.md"
+        },
+        "worker": {
+          "supported": true,
+          "template": ".cursor/rules/baton.mdc"
+        },
+        "reviewer": {
+          "supported": true,
+          "template": ".cursor/commands/baton-review.md"
+        },
+        "auditor": {
+          "supported": true,
+          "template": ".cursor/commands/baton-audit.md"
+        }
+      },
+      "hookEnforcement": {
+        "preToolUse": false,
+        "jsonPermissions": true,
+        "shellEnvWrappers": true,
+        "hookDialect": "cursor",
+        "hookConfigFile": null,
+        "mechanism": "Supports baton guard --hook cursor yielding JSON output on stdout: { permission: 'deny'|'allow', user_message, agent_message } with exit code 2 on deny."
+      },
+      "cloudCiReadiness": {
+        "tier": "low",
+        "headlessExecution": false,
+        "ciIntegration": "Not designed for headless CI; verification occurs via baton verify in standard CI workflows",
+        "notes": "Desktop GUI application; cannot be executed as a headless CI runner."
+      },
+      "offlineCliExecution": {
+        "supported": true,
+        "notes": "Baton CLI commands execute offline from Cursor terminal. Cursor AI features require cloud connectivity."
+      },
+      "limitations": [
+        "Instruction and editor surface only; does not provide an unattended background execution daemon.",
+        "Guard hook is not auto-installed into Cursor settings; requires manual hook wiring or post-edit baton verify."
+      ]
+    },
+    "copilot": {
+      "id": "copilot",
+      "name": "GitHub Copilot",
+      "vendor": "GitHub / Microsoft",
+      "category": "ide-and-cloud",
+      "executionType": "editor-and-ci-agent",
+      "isUnattendedDaemon": false,
+      "instructionSurfaces": [
+        ".github/copilot-instructions.md",
+        ".github/agents/baton-orchestrator.agent.md",
+        ".github/agents/baton-worker.agent.md",
+        ".github/agents/baton-reviewer.agent.md",
+        ".github/agents/baton-auditor.agent.md",
+        ".github/prompts/baton-plan.prompt.md",
+        ".github/prompts/baton-next.prompt.md",
+        ".github/prompts/baton-review.prompt.md",
+        ".github/prompts/baton-status.prompt.md",
+        ".github/prompts/baton-audit.prompt.md",
+        ".github/prompts/baton-digest.prompt.md"
+      ],
+      "executableRunnerSupport": {
+        "supported": true,
+        "runnerType": "cloud-dispatch",
+        "commandBinary": "copilot",
+        "subagentSupport": true
+      },
+      "roles": {
+        "orchestrator": {
+          "supported": true,
+          "template": ".github/agents/baton-orchestrator.agent.md"
+        },
+        "worker": {
+          "supported": true,
+          "template": ".github/agents/baton-worker.agent.md"
+        },
+        "reviewer": {
+          "supported": true,
+          "template": ".github/agents/baton-reviewer.agent.md"
+        },
+        "auditor": {
+          "supported": true,
+          "template": ".github/agents/baton-auditor.agent.md"
+        }
+      },
+      "hookEnforcement": {
+        "preToolUse": false,
+        "jsonPermissions": false,
+        "shellEnvWrappers": true,
+        "hookDialect": "generic",
+        "hookConfigFile": null,
+        "mechanism": "GitHub Actions CI check enforcement (.github/workflows/baton-ci.yml), PR review status gates, and pre-commit hooks."
+      },
+      "cloudCiReadiness": {
+        "tier": "high",
+        "headlessExecution": true,
+        "ciIntegration": "Native GitHub Actions integration via baton dispatch and workflow automation",
+        "notes": "Excellent cloud dispatch support through baton dispatch <packet> --to copilot and CI check runs."
+      },
+      "offlineCliExecution": {
+        "supported": true,
+        "notes": "Baton CLI commands run offline. Copilot coding suggestions and cloud dispatch require GitHub connectivity."
+      },
+      "limitations": [
+        "Local editor extension is instruction-driven; local background daemon execution is not supported.",
+        "PreToolUse interceptor is not available inside the local editor; protection relies on CI and verify gates."
+      ]
+    },
+    "windsurf": {
+      "id": "windsurf",
+      "name": "Windsurf",
+      "vendor": "Codeium",
+      "category": "ide-extension",
+      "executionType": "editor-assisted",
+      "isUnattendedDaemon": false,
+      "instructionSurfaces": [
+        ".windsurf/rules/baton.md",
+        ".windsurf/workflows/baton-plan.md",
+        ".windsurf/workflows/baton-next.md",
+        ".windsurf/workflows/baton-review.md",
+        ".windsurf/workflows/baton-status.md",
+        ".windsurf/workflows/baton-audit.md",
+        ".windsurf/workflows/baton-digest.md"
+      ],
+      "executableRunnerSupport": {
+        "supported": false,
+        "runnerType": "ide-editor",
+        "commandBinary": "windsurf",
+        "subagentSupport": false
+      },
+      "roles": {
+        "orchestrator": {
+          "supported": true,
+          "template": ".windsurf/workflows/baton-plan.md"
+        },
+        "worker": {
+          "supported": true,
+          "template": ".windsurf/rules/baton.md"
+        },
+        "reviewer": {
+          "supported": true,
+          "template": ".windsurf/workflows/baton-review.md"
+        },
+        "auditor": {
+          "supported": true,
+          "template": ".windsurf/workflows/baton-audit.md"
+        }
+      },
+      "hookEnforcement": {
+        "preToolUse": false,
+        "jsonPermissions": false,
+        "shellEnvWrappers": true,
+        "hookDialect": "generic",
+        "hookConfigFile": null,
+        "mechanism": "Rules and workflow files guide agent execution; verification relies on baton verify post-step check."
+      },
+      "cloudCiReadiness": {
+        "tier": "low",
+        "headlessExecution": false,
+        "ciIntegration": "Desktop GUI application; validation in CI runs via baton check and baton verify",
+        "notes": "Not designed for headless execution in CI."
+      },
+      "offlineCliExecution": {
+        "supported": true,
+        "notes": "Baton operations from the embedded terminal run 100% offline."
+      },
+      "limitations": [
+        "Instruction surface only; does not provide an executable headless runner or unattended daemon.",
+        "No native tool interception hook; relies on conversational guidance and post-edit verification."
+      ]
+    },
+    "cline": {
+      "id": "cline",
+      "name": "Cline",
+      "vendor": "Cline Community",
+      "category": "ide-extension",
+      "executionType": "editor-assisted",
+      "isUnattendedDaemon": false,
+      "instructionSurfaces": [
+        ".clinerules/baton.md"
+      ],
+      "executableRunnerSupport": {
+        "supported": false,
+        "runnerType": "vscode-extension",
+        "commandBinary": null,
+        "subagentSupport": false
+      },
+      "roles": {
+        "orchestrator": {
+          "supported": false,
+          "template": null
+        },
+        "worker": {
+          "supported": true,
+          "template": ".clinerules/baton.md"
+        },
+        "reviewer": {
+          "supported": true,
+          "template": ".clinerules/baton.md"
+        },
+        "auditor": {
+          "supported": false,
+          "template": null
+        }
+      },
+      "hookEnforcement": {
+        "preToolUse": false,
+        "jsonPermissions": false,
+        "shellEnvWrappers": true,
+        "hookDialect": "generic",
+        "hookConfigFile": null,
+        "mechanism": "Rules file prompts agent to respect Baton ownership and invoke baton verify before claiming completion."
+      },
+      "cloudCiReadiness": {
+        "tier": "low",
+        "headlessExecution": false,
+        "ciIntegration": "VS Code desktop extension; CI verification relies on repository-level baton verify gates",
+        "notes": "Requires interactive VS Code extension environment."
+      },
+      "offlineCliExecution": {
+        "supported": true,
+        "notes": "Baton CLI commands execute offline from VS Code terminal."
+      },
+      "limitations": [
+        "Instruction surface only; no headless runner CLI or background daemon capability.",
+        "Role separation is prompt-guided within a single .clinerules/baton.md definition rather than dedicated subagents."
+      ]
+    },
+    "opencode": {
+      "id": "opencode",
+      "name": "OpenCode",
+      "vendor": "OpenCode Project",
+      "category": "cli-agent",
+      "executionType": "scriptable-cli",
+      "isUnattendedDaemon": false,
+      "instructionSurfaces": [
+        "AGENTS.md",
+        ".opencode/agent/baton-orchestrator.md",
+        ".opencode/agent/baton-worker.md",
+        ".opencode/agent/baton-reviewer.md",
+        ".opencode/agent/baton-auditor.md"
+      ],
+      "executableRunnerSupport": {
+        "supported": true,
+        "runnerType": "cli",
+        "commandBinary": "opencode",
+        "subagentSupport": true
+      },
+      "roles": {
+        "orchestrator": {
+          "supported": true,
+          "template": ".opencode/agent/baton-orchestrator.md"
+        },
+        "worker": {
+          "supported": true,
+          "template": ".opencode/agent/baton-worker.md"
+        },
+        "reviewer": {
+          "supported": true,
+          "template": ".opencode/agent/baton-reviewer.md"
+        },
+        "auditor": {
+          "supported": true,
+          "template": ".opencode/agent/baton-auditor.md"
+        }
+      },
+      "hookEnforcement": {
+        "preToolUse": false,
+        "jsonPermissions": false,
+        "shellEnvWrappers": true,
+        "hookDialect": "generic",
+        "hookConfigFile": null,
+        "mechanism": "Generic shell/env wrapper (BATON_AGENT=opencode baton guard --hook generic) and post-step verification."
+      },
+      "cloudCiReadiness": {
+        "tier": "high",
+        "headlessExecution": true,
+        "ciIntegration": "CLI-driven execution in containerized or cloud CI runner pipelines",
+        "notes": "Native subagent definitions align cleanly with Baton multi-role workflows."
+      },
+      "offlineCliExecution": {
+        "supported": true,
+        "notes": "Baton operations are completely offline; model execution depends on configured local or remote provider."
+      },
+      "limitations": [
+        "Does not maintain an unattended background daemon; runs per task invocation.",
+        "No PreToolUse interceptor in base configuration; relies on environment wrappers and verification gates."
+      ]
+    },
+    "aider": {
+      "id": "aider",
+      "name": "Aider",
+      "vendor": "Paul Gauthier",
+      "category": "cli-agent",
+      "executionType": "interactive-cli",
+      "isUnattendedDaemon": false,
+      "instructionSurfaces": [
+        "CONVENTIONS.md",
+        ".aider.conf.yml"
+      ],
+      "executableRunnerSupport": {
+        "supported": true,
+        "runnerType": "cli",
+        "commandBinary": "aider",
+        "subagentSupport": false
+      },
+      "roles": {
+        "orchestrator": {
+          "supported": false,
+          "template": null
+        },
+        "worker": {
+          "supported": true,
+          "template": "CONVENTIONS.md"
+        },
+        "reviewer": {
+          "supported": true,
+          "template": "CONVENTIONS.md"
+        },
+        "auditor": {
+          "supported": false,
+          "template": null
+        }
+      },
+      "hookEnforcement": {
+        "preToolUse": false,
+        "jsonPermissions": false,
+        "shellEnvWrappers": true,
+        "hookDialect": "generic",
+        "hookConfigFile": null,
+        "mechanism": "Git pre-commit hooks and baton verify execution prior to committing changes."
+      },
+      "cloudCiReadiness": {
+        "tier": "medium",
+        "headlessExecution": true,
+        "ciIntegration": "Can be executed in scripted mode with --message / --yes in CI pipelines",
+        "notes": "Git-centric architecture integrates directly with repository branches."
+      },
+      "offlineCliExecution": {
+        "supported": true,
+        "notes": "Baton CLI is 100% offline; Aider connects to configured LLM."
+      },
+      "limitations": [
+        "Designed primarily for pair-programming and worker code generation; lacks dedicated multi-agent subagent definitions.",
+        "Does not operate as an unattended background daemon."
+      ]
+    },
+    "custom": {
+      "id": "custom",
+      "name": "Custom agent",
+      "vendor": "User-defined",
+      "category": "extensible",
+      "executionType": "custom",
+      "isUnattendedDaemon": false,
+      "instructionSurfaces": [
+        "AGENTS.md"
+      ],
+      "executableRunnerSupport": {
+        "supported": false,
+        "runnerType": "custom",
+        "commandBinary": null,
+        "subagentSupport": false
+      },
+      "roles": {
+        "orchestrator": {
+          "supported": true,
+          "template": ".baton/prompts/orchestrator.md"
+        },
+        "worker": {
+          "supported": true,
+          "template": ".baton/prompts/worker.md"
+        },
+        "reviewer": {
+          "supported": true,
+          "template": ".baton/prompts/reviewer.md"
+        },
+        "auditor": {
+          "supported": true,
+          "template": ".baton/prompts/auditor.md"
+        }
+      },
+      "hookEnforcement": {
+        "preToolUse": false,
+        "jsonPermissions": false,
+        "shellEnvWrappers": true,
+        "hookDialect": "generic",
+        "hookConfigFile": null,
+        "mechanism": "baton guard --hook generic and baton verify gates invoked by custom runner scripts."
+      },
+      "cloudCiReadiness": {
+        "tier": "medium",
+        "headlessExecution": true,
+        "ciIntegration": "Invoked via baton prompt <role> --agent <id> in custom scripts and CI jobs",
+        "notes": "Provides standard prompt templates for any custom agent."
+      },
+      "offlineCliExecution": {
+        "supported": true,
+        "notes": "Baton core is fully offline."
+      },
+      "limitations": [
+        "User must provide execution runtime and connect prompts to model interfaces.",
+        "No automatic hook installation; must be integrated into custom tool pipeline."
+      ]
+    }
+  }
+}
