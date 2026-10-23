@@ -2,279 +2,571 @@
 
 # Workflow
 
-The full packet lifecycle, who may do what, and what happens when things go wrong. Terms are defined in
-[CONCEPTS.md](CONCEPTS.md); every command is in [COMMANDS.md](COMMANDS.md). `baton` below means
-`node .baton/runtime/bin/baton.js`.
+The complete, deterministic lifecycle of work packets in Agent Baton—from initial user feature request through planning, scoped execution, multi-stage verification, independent review, and fast-forward landing into `main`.
+
+Terms and state invariants are defined in [CONCEPTS.md](CONCEPTS.md); full command syntax is documented in [COMMANDS.md](COMMANDS.md). In this guide, `baton` refers to `node .baton/runtime/bin/baton.js`.
 
 <div align="center">
 <img alt="Agent Baton workflow" src="../assets/diagram-workflow.svg" width="100%">
 </div>
 
-## The protocol every agent follows
+---
 
-The same nine rules are written into `AGENTS.md` and every adapter file by `init`:
+## Architectural Model: Offline Core vs. Cloud Roadmap
 
-1. Session start: `baton check`, then `baton next --agent <me>`. The ledger decides what is ready, not memory or chat.
-2. `baton begin <packet> --agent <me>` before the first write. Touch only the packet's `owns` files plus coordination
-   paths. Need another file? Post a `REQUEST` on the bus or ask the orchestrator. Never edit it.
-3. Work until every done check is true. Blocked: `baton block` with a specific question, then take a stretch packet or
-   run `next` again. Long work: `baton heartbeat`.
-4. Sign-off: `baton verify <id>`, paste real command output into the PR or handoff note, then `baton submit`.
-5. A different agent reviews and records a verdict with evidence.
-6. Auditors file findings and never edit audited files. Authors fix and resolve; filers confirm.
-7. Repeated rejections escalate to the orchestrator.
-8. The orchestrator plans, assigns, keeps the queue deep, rotates reviewers, **commits the final ledger events onto the integration branch**, and closes the day with `digest`.
-9. Empty queue: audit mode.
+Agent Baton operates with a strict separation between its **offline, zero-dependency core CLI** and its **cloud/autonomous roadmap**:
 
-## Roles
-
-| Role | Does | Must not |
+| Architectural Domain | Current Offline Capabilities (v0.1.0) | Cloud & Autonomous Roadmap |
 |---|---|---|
-| orchestrator | `split`, `plan add/edit/import/rm`, `assign`, `reassign`, `carry`, `merge`, `dispatch`, `digest`, `worktrees` | override repo rules or human gates; edit the plan while acting as a worker |
-| worker | `begin`, edit owned files, `verify`, `submit`, fix findings | touch files outside `owns`; review own work |
-| reviewer | `review`, `accept`, `fix`, `reject`, `finding add` | be the author or a contributor of the packet |
-| auditor | `finding add` against accepted work | edit the audited files |
-| human | opens and closes gates, can act as orchestrator | |
+| **Zero Runtime Dependencies** | Standalone Node.js ESM CLI using built-in standard modules (`node:fs`, `node:child_process`, `node:crypto`). No external npm packages required at runtime. | Hosted SaaS orchestrator services, serverless execution hooks. |
+| **Storage & Event Ledger** | Append-only deterministic ledger stored in the Git common directory (`.baton/state/` or git references). Zero network calls required for state reconstruction. | Multi-repository federated sync, cloud database backends, team activity streams. |
+| **Concurrency & Isolation** | Physical Git worktree isolation (`baton worktrees --create`) avoiding Git index locks and dirty workspace overwrites. Local pre-tool file guards (`baton guard`). | Containerized cloud workers, ephemeral VM execution sandboxes. |
+| **Planning & Dispatch** | Local CLI prompt decomposition (`baton split`), deterministic roster assignment (`baton assign`), and manual human gate controls (`baton gate`). | Remote GitHub Issue dispatch (`baton dispatch`), automated PR sync, and webhook-driven multi-agent swarms. |
+| **Verification & Security** | Local diff-based secret scanner, strict file boundary validator, and test suite execution with process timeouts on clean trees. | Distributed matrix verification runners, automated security attestations. |
 
-Only the orchestrator or `human` may write the plan. Setting neither `--by` nor `BATON_AGENT` counts as a human at the
-keyboard.
+For remote and cloud setups, refer to [CLOUD.md](CLOUD.md), [ENTERPRISE_CLOUD.md](ENTERPRISE_CLOUD.md), and [ROADMAP.md](ROADMAP.md).
 
-## 1. Plan
+---
 
-```bash
-baton split "Ship invoice export" --run claude --dry-run   # see the command
-baton split "Ship invoice export" --run claude             # proposal in .baton/proposals/
-baton plan import .baton/proposals/<ts>.json --dry-run     # validate without writing
-baton plan import .baton/proposals/<ts>.json
-baton assign                                               # fill missing authors and reviewers
-baton check
+## The Protocol Every Agent Follows
+
+Every agent initialized into a Baton workspace follows nine non-negotiable operational invariants (written into `AGENTS.md` and agent adapter files by `init`):
+
+1. **Session Start**: Run `baton check`, then `baton next --agent <me>`. The ledger determines what is ready, never chat memory or guesswork.
+2. **Claim Before Touch**: Run `baton begin <packet> --agent <me>` before modifying any file. Touch **only** the packet's `owns` files plus coordination paths. If another file is needed, post a `REQUEST` on the bus or ask the orchestrator. Never edit unclaimed files.
+3. **Execution Invariant**: Work until every done check is true. If blocked, run `baton block` with a specific question, then run `baton next` to pick up unblocked stretch work. For long-running operations, emit `baton heartbeat`.
+4. **Sign-Off Invariant**: Run `baton verify <packet>`, commit the clean state, and run `baton submit <packet>` with verifiable proof.
+5. **Review Invariant**: A different agent reviews every submitted packet and records an evidence-based verdict. Authors never review their own packets.
+6. **Audit Invariant**: Auditors file findings via `baton finding add` and never edit audited files. Authors fix and resolve; filers confirm.
+7. **Escalation Invariant**: Repeated rejections automatically escalate to the orchestrator for re-scoping or reassignment.
+8. **Landing & Publishing**: The orchestrator fast-forwards `main` onto the accepted commit, exports the final event ledger, and closes the day with `baton digest`.
+9. **Idle Mode**: When the build horizon is exhausted, agents switch to audit mode.
+
+---
+
+## Role Hierarchy & Access Boundaries
+
+| Role | Permitted Actions | Strict Prohibitions |
+|---|---|---|
+| **orchestrator** | `split`, `plan (add/edit/import/rm)`, `assign`, `reassign`, `carry`, `merge`, `dispatch`, `digest`, `worktrees` | Cannot override repo rules or bypass human gates; cannot modify the plan while acting as a worker. |
+| **worker** | `begin`, edit owned files, `heartbeat`, `block`, `verify`, `submit`, fix assigned findings | Cannot touch files outside `owns`; cannot review or accept own work. |
+| **reviewer** | `review`, `accept`, `fix`, `reject`, `finding add` | Must not be the author or contributor of the packet under review. |
+| **auditor** | `finding add` against accepted or in-review packets | Cannot edit files under audit. |
+| **human** | Opens/closes gates (`gate open/close`), acts as orchestrator, authorizes shell commands | |
+
+Only the orchestrator or `human` may write to the plan. Omitting `--by` and `BATON_AGENT` defaults the actor to `human`.
+
+---
+
+## Runnable End-to-End Workflow
+
+The complete lifecycle moves linearly through 8 well-defined stages:
+
+```
+[1. User Feature Request]
+           │
+           ▼
+[2. Plan Proposal & Import] ──► [Human Gates & Assignment]
+                                           │
+                                           ▼
+                                [3. Worktree & Begin]
+                                           │
+                                           ▼
+                                [4. Implementation & Bus]
+                                           │
+                                           ▼
+                                [5. Verify & Submit]
+                                           │
+                                           ▼
+                                [6. Independent Review] ──► (Reject/Fix -> Rework)
+                                           │
+                                        (Accept)
+                                           ▼
+                                [7. Fast-Forward Merge] ──► [Ledger Export]
+                                           │
+                                           ▼
+                                [8. Audit Mode & Digest]
 ```
 
-Plan rules (enforced on every write, a change that adds errors is refused):
+---
 
-- ids are unique and match `^[A-Za-z0-9][A-Za-z0-9_.-]*$`;
-- agents and reviewers are in the roster, and the reviewer is not the author;
-- dependencies exist and have no cycle;
-- `owns` is non-empty, repo-relative, without `..`, and contains no protected path;
-- packets that can run concurrently must not overlap in `owns`: a warning inside one track, an error across tracks;
-- track `owns` may not overlap another track's.
+### Stage 1: Feature Request to Structured Proposal
 
-`baton assign` picks an author (track owner, strength overlap with the packet text, lowest load) and a reviewer (needs
-the reviewer role, never the author, fewest reviews so far, rotating). It is deterministic. `--only-unassigned` fills
-blanks only; otherwise it also repairs conflicts. `plan graph [--mermaid]` draws dependencies.
+A workflow begins with a natural language feature request or objective: *"Add JSON invoice export endpoint"*.
 
-The orchestrator should keep the horizon at least a few packets deep; `baton digest` warns when fewer than three
-packets are ready.
-
-## 2. Start
+#### A. Generate Planning Prompt or Proposal
 
 ```bash
+# Preview planning prompt without invoking external tools
+baton split "Add JSON invoice export endpoint" --out .baton/prompt.md
+
+# Or execute an agent CLI to generate a structured proposal
+baton split "Add JSON invoice export endpoint" --run claude --dry-run
+baton split "Add JSON invoice export endpoint" --run claude
+```
+
+`split --run` produces a validated JSON proposal under `.baton/proposals/<timestamp>.json`.
+
+#### B. Dry-Run and Ingest Proposal
+
+```bash
+# Validate proposal schema and check for ownership overlaps without writing
+baton plan import .baton/proposals/<timestamp>.json --dry-run
+
+# Import the validated proposal into active plan (.baton/plan.json)
+baton plan import .baton/proposals/<timestamp>.json
+```
+
+#### C. Alternative: Manual Plan Authoring
+
+```bash
+# Create track with ownership boundaries
+baton plan track add --id api --owner claude --owns src/api/,tests/api/ --by human
+
+# Add a work packet to the track
+baton plan add --title "JSON invoice export" --track api \
+  --owns src/api/export.js,tests/api/export.test.js \
+  --priority P0 \
+  --check "handles empty invoices" \
+  --check "validates ISO-8601 timestamps" \
+  --check "tests pass" \
+  --by human
+```
+
+---
+
+### Stage 2: Plan Approval, Gates & Deterministic Assignment
+
+Before workers pick up work, the orchestrator validates the dependency graph and assigns roles:
+
+```bash
+# Deterministically assign author and independent reviewer
+baton assign --by human
+
+# Validate plan schema, dependency DAG, track ownership bounds, and ledger integrity
+baton check
+
+# Visualize dependency graph in terminal or mermaid syntax
+baton plan graph
+baton plan graph --mermaid
+```
+
+#### Human Gates
+
+If a packet depends on architectural review, API tokens, or human sign-off, it specifies a `gate`:
+
+```bash
+# Inspect all project gates
+baton gate list
+
+# Open a blocking gate with justification
+baton gate open G1 --by human --note "API schema and security review approved"
+```
+
+A closed gate blocks `baton begin` by default (`gate_mode: start`).
+
+---
+
+### Stage 3: Multi-Agent Worktree Isolation & Lease Acquisition
+
+To enable true parallel execution across multiple agents without Git conflicts, Baton creates dedicated worktrees:
+
+```bash
+# Create one worktree per plan track
+baton worktrees --create
+```
+
+#### Directory Structure
+
+```
+your-project/                        # Integration branch root (e.g., main)
+  .baton/plan.json
+  .git/                              # Git common directory (shared event store)
+
+your-project-worktrees/
+  api/                               # Worktree for track 'api' (branch: track/api)
+  ui/                                # Worktree for track 'ui' (branch: track/ui)
+```
+
+#### Starting the Packet
+
+The worker navigates into their track worktree and checks the queue:
+
+```bash
+cd ../your-project-worktrees/api
+
+# Discover next available work in strict priority order
+baton next --agent codex
+```
+
+Check out a dedicated packet branch and begin:
+
+```bash
+# Create branch from the latest track/main tip
+git switch -c baton/WP-001-invoice-export
+
+# Begin packet execution
 baton begin WP-001 --agent codex
 ```
 
-`begin` checks, in order: the agent may take the packet, dependencies, gates, and file-ownership clashes with other
-in-progress packets. Then it takes a lease, snapshots the tree, posts a `CLAIM` and (in git) records the base commit.
+`begin` performs the following atomic actions:
+1. Validates that the agent is authorized to take the packet.
+2. Checks that all prerequisite dependencies and human gates are satisfied.
+3. Checks for file ownership overlaps with any currently active packet.
+4. Acquires an exclusive lease and snapshots the current tree state.
+5. Posts a `CLAIM` event with claimed files and do-not-touch boundaries to `docs/AGENT_BUS.md`.
 
-Dependency rules:
+---
 
-- A same-track dependency blocks starting until it is `READY_FOR_REVIEW` or accepted.
-- A cross-track dependency never blocks, but flags the packet `AT_RISK`.
-- A dependency in `needs_done` must be `ACCEPTED` first.
-- A closed `gate` blocks starting (default `gate_mode: start`).
+### Stage 4: Scoped Implementation, Heartbeats & Blockers
 
-Create the packet branch **from the current integration branch tip** (not a stale or unrelated feature branch):
-`git switch main && git pull --ff-only && git switch -c baton/<packet-id>-<slug>`.
-Work on a branch named `baton/<packet-id>-<slug>` (the default `branches.packetPrefix` is `baton/`). That makes
-`verify` exact (`git-branch` mode) and lets the CI workflow find the packet.
+During implementation, workers must strictly respect their file boundaries:
 
-`begin --pull` takes a packet assigned to someone else; it is announced on the bus.
+- Workers may modify **only** files specified in the packet's `owns` list.
+- Coordination paths (`.baton/`, `docs/AGENT_BUS.md`) may be read or appended per protocol rules.
+- Any attempt to modify unowned files is blocked by `baton guard` and rejected by `baton verify`.
 
-## 3. Build and block
+#### Inter-Agent Requests via Bus
 
-Stay inside `owns`. If you must change something else, post a request:
+If an agent needs an export or change in another agent's file:
 
 ```bash
-baton bus post --from codex --to claude --type REQUEST --packet WP-001 --text "need src/api/index.js exported"
+baton bus post --from codex --to claude --type REQUEST --packet WP-001 \
+  --text "Please export InvoiceFormatter from src/models/invoice.js"
 ```
 
-Stuck on a question only a human or another agent can answer:
+#### Lease Heartbeats
+
+For long tasks, refresh the lease to prevent expiration:
 
 ```bash
-baton block WP-001 --agent codex --reason "no sample data" --question "Where is the fixture?"
-baton next --agent codex          # take a stretch packet or other work
-baton begin WP-001 --agent codex  # BLOCKED -> IN_PROGRESS when unblocked
+baton heartbeat WP-001 --agent codex
 ```
 
-Long work: `baton heartbeat WP-001 --agent codex` extends the lease.
+#### Handling Blockers
 
-### Stale leases
-
-When a lease expires the packet shows `STALE`. Any agent may take over with `baton reclaim WP-001 --agent <me>`; the
-reclaim is announced on the bus. `baton check` warns about stale leases and `baton next` lists the ones you could
-reclaim.
-
-## 4. Verify
+If an agent is blocked by external dependencies or unanswered questions:
 
 ```bash
-git add -A && git commit -m "..."
+baton block WP-001 --agent codex --reason "missing sample fixture" --question "Where is the test fixture for canceled invoices?"
+
+# Check queue for stretch work or other ready packets
+baton next --agent codex
+
+# Once unblocked, resume
+baton begin WP-001 --agent codex
+```
+
+#### Stale Leases & Crash Recovery
+
+If an agent crashes or goes silent past its TTL, the packet shows `STALE`. Any authorized worker may reclaim it:
+
+```bash
+baton reclaim WP-001 --agent codex
+```
+
+`reclaim` records the takeover on the bus, rolls back or inspects unverified changes, and starts a fresh lease.
+
+---
+
+### Stage 5: Multi-Stage Verification & Pre-Review Submission
+
+Once implementation and tests are complete, commit the changes to the packet branch:
+
+```bash
+git add -A && git commit -m "feat(api): implement JSON invoice export"
+```
+
+Run Baton's multi-stage verification pipeline:
+
+```bash
 baton verify WP-001
 ```
 
-`verify` runs, in order of concern:
+`verify` executes 4 strict checks in sequence:
+1. **Scope Guard**: Checks git diff against the packet's `owns` paths. Protected files and foreign packet files cause immediate failure.
+2. **Secret Scan**: Analyzes commits and unstaged changes for AWS tokens, private keys, GitHub credentials, Slack tokens, and generic `secret=` patterns. Deliberate fixtures can be whitelisted with `baton:allow-secret`.
+3. **Automated Test Suite**: Executes the test command (`config.test.command` or packet-specific `test`) inside a subprocess with timeout limits.
+4. **Dirty Tree Check**: Verifies that tests did not generate untracked temporary files or modify working state.
 
-1. Scope guard: every changed file must be inside `owns` or a coordination path. Protected paths are violations. In
-   `git-branch` mode another packet's file is a violation too; in `git-shared` and `snapshot` it is reported as
-   foreign.
-2. Secret scan of changed files, plus the added lines of commits since the base in branch modes. Patterns cover AWS
-   keys, private keys, Google keys, GitHub tokens, Slack tokens, OpenAI and Anthropic `sk-` keys and generic
-   `token`/`secret` assignments. A deliberate false positive is marked with `baton:allow-secret` on the same line.
-3. The test command (`config.test.command`, or the packet's own `test`), run through the shell with a timeout; the last
-   20 lines of output are kept.
-4. A dirty-tree check after the tests, so files the tests create are caught.
+Upon passing, `verify` writes a signed verification marker.
 
-It writes a verify marker and a `verify` event. `--no-tests` checks scope and secrets only and can never be submitted.
-
-## 5. Submit
+#### Submitting for Review
 
 ```bash
-baton submit WP-001 --agent codex --note "all done checks true"
+baton submit WP-001 --agent codex --note "all done checks pass; unit and integration tests green"
 ```
 
-Requires a passing marker that is current: clean tree, HEAD equal to the verified commit. It moves the packet to
-`READY_FOR_REVIEW` and posts a sign-off with the test tail and commit.
+`submit` validates that HEAD exactly matches the verified commit marker, moves the packet status to `READY_FOR_REVIEW`, and posts a sign-off event with test output tail to the bus.
 
-If you change anything afterwards you must verify again. The author may reopen a packet in review with `begin`, which
-discards the marker.
+---
 
-## 6. Review
+### Stage 6: Independent Review, Audit Findings & Verdicts
 
-Reviews are the heart of the workflow. The rules:
+Baton enforces independent review: an author cannot review their own packet (`requireDifferentReviewer: true`).
 
-- The assigned reviewer records the verdict, and never a contributor or author of the packet
-  (`requireDifferentReviewer` defaults to true).
-- The reviewer works from the exact reviewed commit: `baton review WP-001` prints the brief with the diff and
-  checkout commands, the done checks, the verify result and open findings.
-- Run the checks yourself. Do not trust the sign-off note.
-- A verdict needs evidence: a `file:line` or a failing command.
+The assigned reviewer checks their queue:
+
+```bash
+export BATON_AGENT=claude
+baton next --agent claude
+```
+
+#### Inspecting the Review Brief
 
 ```bash
 baton review WP-001
-baton accept WP-001 --by claude --score 9 --note "checked on 3c2e78e"
-baton fix    WP-001 --by claude --note "rename X; add test for Y"      # ACCEPTED_WITH_FIXES
-baton reject WP-001 --by claude --note "export drops empty invoices"   # REJECTED
-baton reassign WP-001 --reviewer gemini --by claude                    # orchestrator, undecided packets only
 ```
 
-- `accept` is refused while the packet has open BLOCKER or MAJOR findings.
-- `reject` needs a note or at least one finding.
-- `fix` (accept with fixes) leaves the packet with its author, who fixes, re-verifies, resubmits, and the reviewer then
-  accepts. It may also be moved back to `IN_PROGRESS`.
-- `--score 0-10` feeds the scoreboard.
+The review brief prints:
+- Packet title, track, author, and commit SHA;
+- Full git diff and checkout commands;
+- Done checks with verification proofs;
+- Test execution output tail;
+- Any active audit findings.
 
-### Findings
+The reviewer must run the tests independently on the checked-out commit.
+
+<a id="findings"></a>
+### Findings & Remediation Lifecycle
+
+If defects or security oversights are identified during review or post-landing audits:
 
 ```bash
-baton finding add --packet WP-001 --by codex --severity MAJOR --text "off-by-one in page loop" \
-  --file src/api/export.js --line 42 --evidence "npm test -- export: 1 failing" --fix "use <= not <"
+# 1. File a finding
+baton finding add --packet WP-001 --by claude --severity MAJOR \
+  --text "Date serializer omits UTC offset in invoice header" \
+  --file src/api/export.js --line 42 \
+  --evidence "npm test failed on timezone fixture" \
+  --fix "Use toISOString() instead of toString()"
+
+# 2. List open findings
 baton finding list --packet WP-001 --open
-baton finding resolve AUD-001 --by claude --resolution fixed --note "see 9f1c2a0"   # the author of the fix
-baton finding resolve AUD-001 --by codex --confirm                                  # the filer closes it
+
+# 3. Author fixes issue, commits, re-verifies, and resolves finding
+baton finding resolve AUD-001 --by codex --resolution fixed --note "Fixed in commit 1a2b3c"
+
+# 4. Filer confirms resolution to close it
+baton finding resolve AUD-001 --by claude --confirm
 ```
 
-Severities: `BLOCKER`, `MAJOR`, `MINOR`. Resolutions: `fixed`, `wontfix`, `invalid`. A finding stops blocking
-acceptance only when the filer confirms it, or the filer marks it `invalid`. `finding list --open` means "not closed", so it
-includes findings that are resolved but not yet confirmed.
+Finding severities:
+- `BLOCKER`: Prevents acceptance and blocks releases.
+- `MAJOR`: Prevents packet acceptance.
+- `MINOR`: Informational; does not prevent acceptance.
 
-## 7. Rejection, carry-over and escalation
-
-```
-REJECTED -> IN_PROGRESS   the author reworks (begin)
-REJECTED -> CARRIED_OVER  the orchestrator parks it, possibly for another author (carry)
-```
+#### Review Verdicts
 
 ```bash
-baton carry WP-001 --by claude --note "split the exporter in two"
+# Accept clean work
+baton accept WP-001 --by claude --score 9 --note "verified tests pass on commit 1a2b3c"
+
+# Accept with minor non-blocking fixes
+baton fix WP-001 --by claude --note "minor comment cleanup in export.js"
+
+# Reject packet and send back to author
+baton reject WP-001 --by claude --note "export drops empty invoice items"
 ```
 
-Each rejection counts. After `escalateAfterRejections` rejections (default 2) a packet that is not done is flagged
-`ESCALATE`; `baton check` warns, `baton digest` lists it under attention and the orchestrator must decide: hand it to a
-different author, change the reviewer, split it, or rewrite its done checks.
+#### Escalation & Carry-Over
 
-## 8. Handoff
+When a packet is rejected, it moves back to `IN_PROGRESS` or the author calls `begin` to rework.
+After repeated rejections (`escalateAfterRejections`, default 2), the packet is flagged `ESCALATE`.
+The orchestrator may carry it over to another iteration or author:
 
 ```bash
-baton handoff WP-001 --to gemini --by codex --note "export done, tests pending; fixtures in tests/fixtures"
+baton carry WP-001 --by claude --note "re-scoping exporter into two smaller packets"
 ```
 
-For a packet that is not in progress this reassigns the author. For one in progress it releases the lease and hands over
-with your context; a `HANDOFF` message goes to the bus. The orchestrator may hand off any packet. The new author then
-runs `begin`.
+---
 
-## 9. Land it
+### Stage 7: Landing, Fast-Forward Merge & Event Ledger Publishing
+
+Once a packet is `ACCEPTED`, it is ready to land onto `main`:
 
 ```bash
+# Fast-forward main to the accepted commit
 baton merge WP-001 --by claude
 ```
 
-Needs an `ACCEPTED` packet with a recorded commit, run by the orchestrator or a human. It only fast-forwards main
-(`git merge --ff-only` where main is checked out, otherwise it moves the ref); it never creates merge commits and
-refuses if main moved. In that case `baton sync` rebases the current branch onto main (it aborts on conflict and leaves
-the branch untouched), then verify and review again.
+`merge` performs a strict fast-forward (`git merge --ff-only`). It **never** creates merge commits.
 
-`baton worktrees --create` gives each track its own branch (`track/<id>`) and directory, so agents never share a
-working tree; all worktrees share one ledger store.
+#### Synchronizing Concurrent Branches (`baton sync`)
 
-## 10. Audit mode
-
-When `baton next` has no build work left it lists **audit targets**: finished or in-review packets worth a second look (read-only). Auditors:
-
-1. read the accepted work and its verify result,
-2. run the checks themselves,
-3. file findings with `baton finding add` (never edit the audited files),
-4. the author fixes and resolves, the auditor confirms.
-
-If even audit has nothing to do, `next` prints `HORIZON EXHAUSTED` and the exact command to ask the orchestrator for
-more packets.
-
-## 11. Gates and releases
+If `main` moved forward while another track was in progress, that track must rebase:
 
 ```bash
-baton gate list
-baton gate open G1 --by human --note "key provisioned"
-baton release            # per milestone: done / in review / total, due date, gates
+cd ../your-project-worktrees/ui
+baton sync
 ```
 
-Accepted packets count as done; packets in review are counted separately; stretch packets are excluded.
+`sync` rebases the current track branch onto `main`. If a rebase conflict occurs, it aborts cleanly and leaves the branch untouched for manual resolution. Active packets on the rebased branch must be re-verified before submission.
 
-## Day open and day close (orchestrator)
+#### Publishing Ledger Events
+
+Because Baton uses an append-only event ledger stored in the Git common directory, final events (acceptance, review, merge) should be committed to Git:
 
 ```bash
-baton digest          # what changed since the last digest, what needs attention
-baton digest --since all --no-mark
-baton render          # refresh .baton/views/*.md
+cd your-project                     # On the integration branch (main)
+baton ledger export
+baton ledger verify
+git add .baton/ledger/
+git commit -m "chore(baton): record WP-001 merge and acceptance in ledger"
+git push origin main
 ```
 
-## Exit codes
+---
 
-`0` ok, `1` a rule was violated or a check failed, `2` usage error, `3` internal error. Errors go to stderr; `--json`
-output goes to stdout as exactly one document.
+### Stage 8: Audit Mode, Observability & Daily Lifecycle
 
-## Publishing final events and working across worktrees
+When an agent calls `baton next` and all implementation packets are completed or in-progress, the agent automatically enters **Audit Mode**:
 
-`merge` moves the integration branch to the reviewed implementation commit. The later verification, sign-off, verdict
-and merged events remain in the Git-common-directory local store until published; they are **not** in that commit.
-After merging, switch to (or use) the integration-branch worktree, run `baton ledger export` and
-`baton ledger verify`, inspect `git diff --cached` after `git add .baton/ledger/`, then commit and push the
-ledger-only changes. Fresh clones must see the persisted events before trusting their packet status.
+```bash
+baton next --agent codex
+# Returns: AUDIT TARGETS (read-only audit of accepted packets)
+```
 
-Only worktrees of **one Git clone** share the local event store; `.baton/plan.json` remains branch-specific.
-If an orchestrator publishes new assignments on `main`, each idle worker must update its worktree's plan from
-`main` (for example `git merge --ff-only main` where legal), or use a new worktree created from updated
-`main`, **before** calling `baton next`. Do not assume that events alone update packet definitions.
+Auditors:
+1. Check out accepted commits;
+2. Verify tests and edge cases;
+3. File findings via `baton finding add` (auditors never edit audited files);
+4. The packet author provides the fix; the auditor confirms.
 
-Accepted packets cannot be reverified after `sync`. If main moved, create and independently verify a new
-replacement packet based on its current tip. The original accepted packet remains historical and **unmerged**.
+If all audit targets are exhausted, `next` prints `HORIZON EXHAUSTED` with instructions for the orchestrator.
 
-For cloud dispatch, create the destination repository's `baton` label with
-`gh label create baton --repo owner/name --color 0969da` (substitute the destination repository). Ensure
-`--to` matches the assigned worker's provider kind and its runner uses the **exact** roster ID before dispatch. Author changes require `baton handoff` and an independent reviewer.
+#### Daily Orchestrator Maintenance
+
+```bash
+# Daily activity digest: completed packets, open blockers, items needing attention
+baton digest
+
+# Refresh markdown summary views in .baton/views/
+baton render
+
+# Check workspace release progress against milestones and gates
+baton release
+
+# View per-agent quality scorecards
+baton scores
+```
+
+---
+
+## Hands-On Tutorial: Multi-Agent Worktree Isolation
+
+This step-by-step tutorial demonstrates how two agents (`claude` on `api` track and `gemini` on `ui` track) work concurrently on the same repository without file clobbering or git lock contention.
+
+### 1. Repository Setup & Plan Creation
+
+```bash
+# From repository root
+baton plan track add --id api --owner claude --owns src/api/,tests/api/ --by human
+baton plan track add --id ui --owner gemini --owns src/ui/,tests/ui/ --by human
+
+baton plan add --title "API endpoints" --track api --owns src/api/routes.js,tests/api/routes.test.js --by human
+baton plan add --title "UI dashboard" --track ui --owns src/ui/Dashboard.js,tests/ui/Dashboard.test.js --by human
+
+baton assign --by human
+git add .baton/plan.json && git commit -m "chore: setup parallel tracks"
+```
+
+### 2. Create Isolated Worktrees
+
+```bash
+baton worktrees --create
+```
+
+Output:
+```
+api            track/api                created /path/to/project-worktrees/api
+ui             track/ui                 created /path/to/project-worktrees/ui
+Each agent: cd into its track worktree, then baton begin/verify/submit there.
+```
+
+### 3. Agent A Executes in Worktree `api`
+
+```bash
+cd ../project-worktrees/api
+export BATON_AGENT=claude
+
+# Start packet
+baton begin WP-001 --agent claude
+
+# Create API code and tests
+echo "export const routes = [];" > src/api/routes.js
+echo "import test from 'node:test'; test('api', () => {});" > tests/api/routes.test.js
+
+# Commit and verify
+git add src/api/ tests/api/ && git commit -m "feat(api): routes"
+baton verify WP-001
+baton submit WP-001 --agent claude --note "routes ready"
+```
+
+### 4. Agent B Executes Simultaneously in Worktree `ui`
+
+Agent B works in its own separate directory with zero Git index contention:
+
+```bash
+cd ../project-worktrees/ui
+export BATON_AGENT=gemini
+
+# Start packet
+baton begin WP-002 --agent gemini
+
+# Create UI component and tests
+echo "export function Dashboard() {}" > src/ui/Dashboard.js
+echo "import test from 'node:test'; test('ui', () => {});" > tests/ui/Dashboard.test.js
+
+# Commit and verify
+git add src/ui/ tests/ui/ && git commit -m "feat(ui): dashboard"
+baton verify WP-002
+baton submit WP-002 --agent gemini --note "dashboard ready"
+```
+
+### 5. Review & Cross-Agent Landing
+
+1. Reviewer accepts Agent A's packet:
+   ```bash
+   baton accept WP-001 --by gemini --score 10 --note "clean routes"
+   ```
+2. Orchestrator merges Agent A's packet to `main`:
+   ```bash
+   baton merge WP-001 --by human
+   ```
+3. Agent B rebases worktree `ui` cleanly onto updated `main`:
+   ```bash
+   cd ../project-worktrees/ui
+   baton sync
+   ```
+4. Reviewer accepts Agent B's packet:
+   ```bash
+   baton accept WP-002 --by claude --score 10 --note "clean dashboard"
+   baton merge WP-002 --by human
+   ```
+
+Both tracks are merged into `main` without a single Git merge conflict or dirty tree collision!
+
+---
+
+## Exit Codes Reference
+
+| Exit Code | Classification | Meaning |
+|---|---|---|
+| `0` | Success | Command completed successfully. |
+| `1` | Check Failure | A business rule, test assertion, scope constraint, or dependency check failed. |
+| `2` | Usage Error | Invalid command-line arguments, missing required options, or unknown flags. |
+| `3` | Internal Error | Unhandled exception or unexpected system error. |
+
+All structured commands support `--json` output written to `stdout`. Diagnostic logs and error messages are written to `stderr`.
+
+---
+
+## Related Documentation
+
+- [QUICKSTART.md](QUICKSTART.md) — 10-minute guide from zero to your first accepted packet
+- [COMMANDS.md](COMMANDS.md) — Exhaustive CLI reference for every command and option
+- [CONCEPTS.md](CONCEPTS.md) — Packet states, leases, dependencies, and core glossary
+- [PLAN_FORMAT.md](PLAN_FORMAT.md) — Complete specification of `.baton/plan.json`
+- [CLOUD.md](CLOUD.md) — GitHub Actions and cloud runner integration
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — Diagnostics, doctor checks, and common remediation patterns
+- [ROADMAP.md](ROADMAP.md) — Future architecture and enterprise cloud vision
