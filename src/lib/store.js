@@ -271,7 +271,319 @@ export function verifyLedger(root) {
   return problems.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
-function copyValid(fromDir, toDir) {
+/**
+ * Reconciles the local event store with an incoming event directory (e.g. tracked mirror or remote clone).
+ * Detects missing parents, corrupt events, revision conflicts, and semantic conflicts (conflicting claims,
+ * divergent verdicts). Independent safe events are merged deterministically; unsafe conflicts are surfaced
+ * without silently choosing an inconsistent owner or verdict.
+ *
+ * @param {string} root
+ * @param {{fromDir?: string, dryRun?: boolean}} [options]
+ * @returns {{
+ *   ok: boolean,
+ *   dryRun: boolean,
+ *   from: string,
+ *   counts: { total: number, identical: number, safe: number, applied: number, conflicts: number, skipped: number },
+ *   identical: string[],
+ *   safe: string[],
+ *   applied: string[],
+ *   conflicts: Array<{ id: string, type: string, packet?: string, stream?: string, reason: string, action: string, localEvent?: string, remoteEvent?: string }>,
+ *   skipped: Array<{ id: string, reason: string, type: string }>
+ * }}
+ */
+export function reconcileLedger(root, { fromDir = ledgerDir(root), dryRun = false } = {}) {
+  return withLock(stateDir(root), () => {
+    const fromPath = path.resolve(fromDir);
+    if (!fs.existsSync(fromPath)) {
+      return {
+        ok: true,
+        dryRun: Boolean(dryRun),
+        from: fromPath,
+        counts: { total: 0, identical: 0, safe: 0, applied: 0, conflicts: 0, skipped: 0 },
+        identical: [],
+        safe: [],
+        applied: [],
+        conflicts: [],
+        skipped: [],
+      };
+    }
+
+    const localStoreDir = eventsDir(root);
+    const localMirrorDir = ledgerDir(root);
+    const localStoreIds = new Set(listIds(localStoreDir));
+    const localEvents = readEvents(root);
+    const localById = new Map(localEvents.map((e) => [e.id, e]));
+    const mirror = mirrorEnabled(root);
+
+    const remoteIds = listIds(fromPath);
+    const skipped = [];
+    const identical = [];
+    const candidateEvents = [];
+
+    // 1. Structural & cryptographic integrity pass on remote files
+    for (const id of remoteIds) {
+      const file = path.join(fromPath, `${id}.json`);
+      const { ev, error } = readEventFile(file);
+      if (error) {
+        skipped.push({ id, reason: error ? 'unreadable' : `unreadable JSON (${error})`, type: 'unreadable' });
+        continue;
+      }
+      if (!ev || typeof ev !== 'object' || Array.isArray(ev)) {
+        skipped.push({ id, reason: 'event must be a JSON object', type: 'corrupt' });
+        continue;
+      }
+      if (ev.id !== id) {
+        skipped.push({ id, reason: `filename does not match event id ${ev.id}`, type: 'corrupt' });
+        continue;
+      }
+      if (!ev.sha || eventSha(ev) !== ev.sha) {
+        skipped.push({ id, reason: 'failed sha check', type: 'sha_mismatch' });
+        continue;
+      }
+      const schemaProblems = validateEventSchema(ev);
+      if (schemaProblems.length) {
+        skipped.push({ id, reason: `invalid schema: ${schemaProblems.join('; ')}`, type: 'invalid_schema' });
+        continue;
+      }
+
+      if (localStoreIds.has(id)) {
+        const localFile = path.join(localStoreDir, `${id}.json`);
+        const { ev: localEv } = readEventFile(localFile);
+        if (localEv && localEv.sha === ev.sha) {
+          identical.push(id);
+        } else {
+          skipped.push({ id, reason: 'tampered: local and remote copies with same ID have differing hashes', type: 'sha_mismatch' });
+        }
+      } else {
+        candidateEvents.push(ev);
+      }
+    }
+
+    // 2. Graph and DAG validation (parents, cycles, revision collisions)
+    const conflicts = [];
+    const conflictedIds = new Set();
+
+    // Map of all known valid events (local + candidate)
+    const combinedById = new Map(localById);
+    for (const ev of candidateEvents) {
+      combinedById.set(ev.id, ev);
+    }
+
+    // Check missing parents
+    for (const ev of candidateEvents) {
+      for (const parentId of ev.parents || []) {
+        if (!combinedById.has(parentId)) {
+          conflicts.push({
+            id: ev.id,
+            type: 'missing_parent',
+            parent: parentId,
+            reason: `missing causal parent ${parentId}`,
+            action: 'Pull predecessor commits or fetch missing events from origin',
+          });
+          conflictedIds.add(ev.id);
+        }
+      }
+    }
+
+    // Check cycles in candidate + local
+    const eventsForCycleCheck = [...localEvents, ...candidateEvents.filter((e) => !conflictedIds.has(e.id))];
+    const indegree = new Map(eventsForCycleCheck.map((ev) => [ev.id, 0]));
+    const children = new Map(eventsForCycleCheck.map((ev) => [ev.id, []]));
+    for (const ev of eventsForCycleCheck) {
+      for (const parent of ev.parents || []) {
+        if (indegree.has(parent)) {
+          indegree.set(ev.id, indegree.get(ev.id) + 1);
+          children.get(parent).push(ev.id);
+        }
+      }
+    }
+    const ready = [...indegree].filter(([, deg]) => deg === 0).map(([id]) => id);
+    let visitedCount = 0;
+    while (ready.length) {
+      const id = ready.pop();
+      visitedCount++;
+      for (const child of children.get(id) || []) {
+        indegree.set(child, indegree.get(child) - 1);
+        if (indegree.get(child) === 0) ready.push(child);
+      }
+    }
+    if (visitedCount !== eventsForCycleCheck.length) {
+      for (const [id, deg] of indegree) {
+        if (deg > 0 && !conflictedIds.has(id) && !localById.has(id)) {
+          conflicts.push({
+            id,
+            type: 'causal_cycle',
+            reason: 'causal parent cycle detected',
+            action: 'Break circular event dependency or discard invalid event',
+          });
+          conflictedIds.add(id);
+        }
+      }
+    }
+
+    // Check revision collisions in same stream
+    const streamRevisions = new Map();
+    for (const ev of localEvents) {
+      if (ev.rev != null) {
+        streamRevisions.set(`${eventStream(ev)}@${ev.rev}`, ev.id);
+      }
+    }
+    for (const ev of candidateEvents) {
+      if (conflictedIds.has(ev.id) || ev.rev == null) continue;
+      const key = `${eventStream(ev)}@${ev.rev}`;
+      const existingId = streamRevisions.get(key);
+      if (existingId && existingId !== ev.id) {
+        conflicts.push({
+          id: ev.id,
+          type: 'rev_conflict',
+          stream: eventStream(ev),
+          rev: ev.rev,
+          conflictingWith: existingId,
+          reason: `concurrent revision conflict with ${existingId} in ${eventStream(ev)} at rev ${ev.rev}`,
+          action: 'Resolve branch divergence or rebase events sequentially',
+        });
+        conflictedIds.add(ev.id);
+      } else {
+        streamRevisions.set(key, ev.id);
+      }
+    }
+
+    // 3. Semantic / business-rule conflicts (claim conflicts & verdict conflicts)
+    const localPacketClaims = new Map();
+    const localPacketVerdicts = new Map();
+    for (const ev of localEvents) {
+      if (!ev.packet) continue;
+      if (ev.kind === 'begin') {
+        localPacketClaims.set(ev.packet, {
+          by: ev.by,
+          eventId: ev.id,
+          leaseUntil: ev.data?.lease_until || null,
+          leaseToken: ev.data?.lease_token || 0,
+        });
+      } else if (ev.kind === 'handoff' && ev.to === 'BLOCKED') {
+        localPacketClaims.delete(ev.packet);
+      }
+      if (ev.kind === 'verdict') {
+        localPacketVerdicts.set(ev.packet, {
+          outcome: ev.to,
+          by: ev.by,
+          eventId: ev.id,
+        });
+      }
+    }
+
+    const now = utcnow();
+    for (const ev of candidateEvents) {
+      if (conflictedIds.has(ev.id) || !ev.packet) continue;
+
+      // Claim conflict check
+      if (ev.kind === 'begin') {
+        const localClaim = localPacketClaims.get(ev.packet);
+        if (localClaim && localClaim.by && localClaim.by !== ev.by) {
+          const leaseEnd = localClaim.leaseUntil ? new Date(localClaim.leaseUntil) : null;
+          const evTime = ev.ts ? new Date(ev.ts) : now;
+          const isExpiredReclaim = (leaseEnd && evTime > leaseEnd) || ev.note?.startsWith('reclaimed');
+          if (!isExpiredReclaim) {
+            conflicts.push({
+              id: ev.id,
+              type: 'claim_conflict',
+              packet: ev.packet,
+              localOwner: localClaim.by,
+              remoteClaimant: ev.by,
+              localEvent: localClaim.eventId,
+              remoteEvent: ev.id,
+              reason: `concurrent conflicting claim on packet ${ev.packet} by ${ev.by} (locally owned by ${localClaim.by})`,
+              action: 'Arbitrate packet ownership: keep local claim or yield with baton begin --force',
+            });
+            conflictedIds.add(ev.id);
+            continue;
+          }
+        }
+      }
+
+      // Verdict conflict check
+      if (ev.kind === 'verdict') {
+        const localVerdict = localPacketVerdicts.get(ev.packet);
+        if (localVerdict && localVerdict.outcome !== ev.to) {
+          conflicts.push({
+            id: ev.id,
+            type: 'verdict_conflict',
+            packet: ev.packet,
+            localVerdict: localVerdict.outcome,
+            remoteVerdict: ev.to,
+            localEvent: localVerdict.eventId,
+            remoteEvent: ev.id,
+            reason: `conflicting verdict for packet ${ev.packet} (${localVerdict.outcome} locally vs ${ev.to} remotely)`,
+            action: 'Review contradictory reviews and submit a resolving verdict',
+          });
+          conflictedIds.add(ev.id);
+          continue;
+        }
+      }
+    }
+
+    // 4. Cascade: any candidate event depending on a conflicted event is transitively conflicted
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const ev of candidateEvents) {
+        if (conflictedIds.has(ev.id)) continue;
+        for (const parentId of ev.parents || []) {
+          if (conflictedIds.has(parentId)) {
+            conflicts.push({
+              id: ev.id,
+              type: 'dependency_conflict',
+              reason: `depends on conflicted event ${parentId}`,
+              action: 'Resolve root conflict first',
+            });
+            conflictedIds.add(ev.id);
+            changed = true;
+            break;
+          }
+        }
+      }
+    }
+
+    // 5. Safe events partition & deterministic ordering
+    const safeCandidateEvents = candidateEvents.filter((ev) => !conflictedIds.has(ev.id));
+    const safeOrdered = orderEvents(safeCandidateEvents);
+    const safeIds = safeOrdered.map((e) => e.id);
+
+    // 6. Apply if not dry-run
+    const applied = [];
+    if (!dryRun) {
+      for (const ev of safeOrdered) {
+        const text = JSON.stringify(ev, null, 2) + '\n';
+        writeFileAtomic(path.join(localStoreDir, `${ev.id}.json`), text);
+        if (mirror) {
+          writeFileAtomic(path.join(localMirrorDir, `${ev.id}.json`), text);
+        }
+        applied.push(ev.id);
+      }
+    }
+
+    return {
+      ok: conflicts.length === 0 && skipped.length === 0,
+      dryRun: Boolean(dryRun),
+      from: fromPath,
+      counts: {
+        total: remoteIds.length,
+        identical: identical.length,
+        safe: safeIds.length,
+        applied: applied.length,
+        conflicts: conflicts.length,
+        skipped: skipped.length,
+      },
+      identical,
+      safe: safeIds,
+      applied,
+      conflicts,
+      skipped,
+    };
+  });
+}
+
+function copyValid(fromDir, toDir, { dryRun = false } = {}) {
   const copied = [];
   const skipped = [];
   const have = new Set(listIds(toDir));
@@ -283,24 +595,24 @@ function copyValid(fromDir, toDir) {
     if (error || !ev || typeof ev !== 'object' || Array.isArray(ev) || ev.id !== id || !ev.sha || eventSha(ev) !== ev.sha || schemaProblems.length) {
       skipped.push({ id, reason: error ? 'unreadable' : schemaProblems.length ? `invalid schema: ${schemaProblems.join('; ')}` : 'failed sha check' }); continue;
     }
-    writeFileAtomic(path.join(toDir, `${id}.json`), fs.readFileSync(file, 'utf8'));
+    if (!dryRun) writeFileAtomic(path.join(toDir, `${id}.json`), fs.readFileSync(file, 'utf8'));
     copied.push(id);
   }
   return { copied, skipped };
 }
 
 /** Copy valid events from the tracked mirror (or `fromDir`) into the local store. */
-export function importLedger(root, fromDir = ledgerDir(root)) {
+export function importLedger(root, fromDir = ledgerDir(root), { dryRun = false } = {}) {
   return withLock(stateDir(root), () => {
-    const { copied, skipped } = copyValid(fromDir, eventsDir(root));
+    const { copied, skipped } = copyValid(fromDir, eventsDir(root), { dryRun });
     return { imported: copied, skipped };
   });
 }
 
 /** Copy valid local events missing from the tracked mirror into `.baton/ledger/`. */
-export function exportLedger(root) {
+export function exportLedger(root, { dryRun = false } = {}) {
   return withLock(stateDir(root), () => {
-    const { copied, skipped } = copyValid(eventsDir(root), ledgerDir(root));
+    const { copied, skipped } = copyValid(eventsDir(root), ledgerDir(root), { dryRun });
     return { exported: copied, skipped };
   });
 }

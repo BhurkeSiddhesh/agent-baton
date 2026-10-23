@@ -1,5 +1,6 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { makeTempRepo } from './helpers.js';
 import { main } from '../src/cli.js';
 import { memoryStream } from '../src/lib/context.js';
@@ -270,4 +271,64 @@ test('BAT-027: CLI commands accept --op-id and baton ledger reconcile works', as
   const rec = await cli(r.root, ['ledger', 'reconcile', '--json']);
   assert.equal(rec.status, 0, rec.stderr);
   assert.ok(json(rec).reconciled !== undefined);
+});
+
+test('BAT-028: diverged clone ledger reconciliation, conflict detection and dry-run', async () => {
+  // Clone 1 and Clone 2 start with same plan
+  const c1 = repo();
+  const c2 = repo();
+
+  // Clone 1 works on WP-001
+  const b1 = await cli(c1.root, ['begin', 'WP-001', '--agent', 'codex', '--json']);
+  assert.equal(b1.status, 0);
+  c1.write('src/api/export.js', '// exporter work\n');
+  await cli(c1.root, ['verify', 'WP-001']);
+  await cli(c1.root, ['submit', 'WP-001', '--agent', 'codex']);
+  assert.equal(await status(c1, 'WP-001'), 'READY_FOR_REVIEW');
+
+  // Clone 2 works on independent packet WP-003 (cross-track UI, agent gemini)
+  const b2 = await cli(c2.root, ['begin', 'WP-003', '--agent', 'gemini', '--json']);
+  assert.equal(b2.status, 0, b2.stderr);
+  c2.write('src/ui/button.js', '// button work\n');
+  await cli(c2.root, ['verify', 'WP-003']);
+  await cli(c2.root, ['submit', 'WP-003', '--agent', 'gemini']);
+  assert.equal(await status(c2, 'WP-003'), 'READY_FOR_REVIEW');
+
+  const c2Mirror = path.join(c2.root, '.baton', 'ledger');
+
+  // 1. Dry-run reconciliation in Clone 1 from Clone 2
+  const dry = await cli(c1.root, ['ledger', 'reconcile', '--from', c2Mirror, '--dry-run', '--json']);
+  assert.equal(dry.status, 0, dry.stderr);
+  const dryJson = json(dry);
+  assert.equal(dryJson.ok, true);
+  assert.equal(dryJson.dryRun, true);
+  assert.ok(dryJson.ledger.safe.length >= 3); // begin, verify, submit, messages
+  assert.equal(dryJson.ledger.applied.length, 0); // dry-run writes nothing
+  assert.equal(await status(c1, 'WP-003'), 'PLANNED'); // untouched in Clone 1
+
+  // 2. Real reconciliation in Clone 1 from Clone 2
+  const real = await cli(c1.root, ['ledger', 'reconcile', '--from', c2Mirror, '--json']);
+  assert.equal(real.status, 0, real.stderr);
+  const realJson = json(real);
+  assert.equal(realJson.ok, true);
+  assert.ok(realJson.ledger.applied.length >= 3);
+  // Both packets now in READY_FOR_REVIEW in Clone 1!
+  assert.equal(await status(c1, 'WP-001'), 'READY_FOR_REVIEW');
+  assert.equal(await status(c1, 'WP-003'), 'READY_FOR_REVIEW');
+
+  // 3. Clone 3 with conflicting simultaneous claim on WP-001
+  const c3 = repo();
+  const b3 = await cli(c3.root, ['begin', 'WP-001', '--agent', 'gemini', '--pull']);
+  assert.equal(b3.status, 0, b3.stderr);
+  const c3Mirror = path.join(c3.root, '.baton', 'ledger');
+
+  const conflict = await cli(c1.root, ['ledger', 'reconcile', '--from', c3Mirror, '--json']);
+  assert.equal(conflict.status, 1);
+  const conflictJson = json(conflict);
+  assert.equal(conflictJson.ok, false);
+  const claimConf = conflictJson.ledger.conflicts.find((c) => c.type === 'claim_conflict' || c.type === 'rev_conflict');
+  assert.ok(claimConf);
+
+  // Local owner in Clone 1 was NOT silently overwritten
+  assert.equal(await status(c1, 'WP-001'), 'READY_FOR_REVIEW');
 });

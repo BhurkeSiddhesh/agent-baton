@@ -31,13 +31,22 @@ be detected from one copy, which is the reason for the second copy in the local 
 After you pull or merge branches that carry events:
 
 ```bash
-baton ledger verify      # hashes, and local/mirror agreement
-baton ledger import      # copy valid events from .baton/ledger/ into the local store
-baton ledger export      # the other way: copy local events missing from the mirror
+baton ledger verify                                         # hashes, and local/mirror agreement
+baton ledger import [--dry-run]                             # copy valid events from .baton/ledger/ into the local store
+baton ledger export [--dry-run]                             # the other way: copy local events missing from the mirror
+baton ledger reconcile [--from <dir>] [--dry-run] [--json]  # reconcile diverged clone ledgers and operations safely
 ```
 
 `baton status`, `next` and the rest read the union of both stores, so even without `import` the derived state is right;
 `import` makes the local store complete. `baton check` warns about unsynced copies.
+
+### Reconciling diverged clones and conflicts
+
+When separate Git clones or disconnected runners work concurrently:
+- Independent work on different packets converges automatically and deterministically.
+- Corrupt event files, broken causal chains (missing parents), and concurrent revision collisions are detected.
+- Conflicting simultaneous claims on the same packet (`claim_conflict`) or contradictory reviewer verdicts (`verdict_conflict`) are never silently chosen or overwritten.
+- `baton ledger reconcile [--from <dir>] [--dry-run] [--json]` surfaces conflicts with actionable resolution guidance while applying only safe events. Use `--dry-run` to preview convergence without writing to disk.
 
 ## Branch naming
 
