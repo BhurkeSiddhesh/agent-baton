@@ -90,9 +90,22 @@ Before merging, consult the [branch and tag protection runbook](docs/BRANCH_PROT
 
 Follow the [governance and compatibility policy](docs/GOVERNANCE.md): reference a tracked issue, disclose CLI/config/ledger compatibility and rollback impact, and include real CI evidence. A review by a different Baton roster ID alone is not proof of an independent human review. Mark partial implementation with `Refs #N`, not `Closes #N`.
 
-1. Branch from `main`, keep the change focused, and add or update tests.
-2. Run `npm test` on your platform. CI runs Linux, Windows and macOS on Node 18, 20 and 22.
-3. Update [CHANGELOG.md](CHANGELOG.md) under `Unreleased`.
-4. Fill in the pull request template. Describe behaviour changes and any new refusal or exit code.
+### Required evidence for PR acceptance
+
+Every pull request must satisfy the following acceptance criteria before merge authorization:
+1. **Targeted branch and focused scope:** Branch from `main`, keep the diff minimal and focused on a single issue, and ensure commit messages follow conventional formats (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`).
+2. **Automated test suite:** Run `npm test` locally. CI must pass cleanly across Ubuntu, Windows, and macOS on Node 18, 20, and 22, as well as the Git 2.30 Debian baseline.
+3. **Negative and refusal tests:** Include explicit tests for invalid arguments, unauthorized actions, error conditions, and expected exit codes (`1` for `BatonError`, `2` for usage errors).
+4. **Zero runtime dependencies:** Verify that `package.json` contains no runtime `dependencies`. Do not add third-party npm packages.
+5. **Documentation and link validation:** When modifying commands, flags, or CLI summaries, regenerate command documentation (`node .github/scripts/gen-commands.mjs`) and verify links (`node .github/scripts/check-links.mjs`).
+6. **Compatibility and rollback disclosure:** Document any impact on schema versions (`hv`), configuration (`.baton/config.json`), or agent adapters (`templates/adapters.json`), providing explicit rollback instructions.
+7. **Changelog record:** Update [CHANGELOG.md](CHANGELOG.md) under `Unreleased` describing behavior changes, fixes, or security disclosures.
+8. **PR template completion:** Complete the pull request template in full, including issue references (`Closes #N` or `Refs #N`), acceptance evidence, compatibility notes, and security review confirmations.
+
+### Maintainer and reviewer expectations
+
+- Maintainers triage incoming contributions, confirm roadmap alignment, review security implications, and authorize merges and releases.
+- Code reviewers inspect exact diffs, verify acceptance criteria independently, and reject submissions lacking reproducible test evidence or clean CI results.
+- Coding agent assignments (such as `--by <agent>`) provide coordination provenance but do not constitute authenticated code reviews. Authoritative review requires maintainer oversight.
 
 Agent Baton is built with Agent Baton: if you use coding agents on this repository, follow `AGENTS.md`.
