@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { makeTempRepo, sampleConfig, cleanEnv, BIN } from './helpers.js';
 import { main } from '../src/cli.js';
 import { buildContext, memoryStream } from '../src/lib/context.js';
+import { toPosix } from '../src/lib/util.js';
 import * as guard from '../src/commands/guard.js';
 import { extractPaths, resolveToolPath } from '../src/commands/guard.js';
 
@@ -157,8 +158,12 @@ test('payload shapes: path/file keys, edits arrays, multiple files, non-file too
   assert.equal((await check(r, '')).status, 0);
   assert.equal((await check(r, 'null')).status, 0);
   const junk = await check(r, '{not json');
-  assert.equal(junk.status, 0);
+  assert.equal(junk.status, 2);
   assert.match(junk.stderr, /not valid JSON/);
+  const w = await setup('warn');
+  const junkWarn = await check(w, '{not json');
+  assert.equal(junkWarn.status, 0);
+  assert.match(junkWarn.stderr, /not valid JSON/);
   assert.deepEqual(extractPaths({ tool_input: { file_path: 'a', path: 'b' }, file_path: 'a' }).sort(), ['a', 'b']);
 });
 
@@ -280,4 +285,196 @@ test('resolveToolPath returns repo-relative posix paths', async () => {
   assert.deepEqual(a.rels, ['src/api/export.js']);
   assert.equal(resolveToolPath(r.root, path.join(os.tmpdir(), 'x')).outside, true);
   assert.ok(resolveToolPath(r.root, 'a\0b').deny);
+});
+
+test('traversal: URL-encoded and double-encoded directory traversals are resolved and caught', async () => {
+  const r = await setup();
+  const name = path.basename(r.root);
+
+  // Single and double-encoded ../ sequences trying to reach unowned files
+  assert.equal((await check(r, edit('src/api/%2e%2e/%2e%2e/README.md'))).status, 2);
+  assert.equal((await check(r, edit('src/api/%252e%252e%252f%252e%252e%252fREADME.md'))).status, 2);
+  assert.equal((await check(r, edit('src/api/..%2f..%2fREADME.md'))).status, 2);
+  assert.equal((await check(r, edit('src/api/..%5c..%5cREADME.md'))).status, 2);
+  assert.equal((await check(r, edit('src/api/%2e%2e%5c%2e%2e%5cREADME.md'))).status, 2);
+  assert.equal((await check(r, edit('src/api/%252e%252e%255c%252e%252e%255cREADME.md'))).status, 2);
+
+  // Traversal leaving and re-entering via URL encoding
+  assert.equal((await check(r, edit(`src/api/%2e%2e/%2e%2e/%2e%2e/${name}/README.md`))).status, 2);
+  assert.equal((await check(r, edit(`src/api/%252e%252e%252f%252e%252e%252f%252e%252e%252f${name}/src/api/export.js`))).status, 0);
+
+  // Double-encoded NUL byte is denied
+  const dNul = await check(r, edit('src/api/export.js%2500.txt'));
+  assert.equal(dNul.status, 2);
+  assert.match(dNul.stderr, /NUL/);
+});
+
+test('NTFS alternate data streams: colon stream syntax is denied across platforms', async () => {
+  const r = await setup();
+  for (const s of [
+    'src/api/export.js:hidden',
+    'src/api/export.js::$DATA',
+    'src/api/export.js:stream:$DATA',
+    'src/api/export.js%3ahidden',
+    'src/api/export.js%253ahidden',
+    'src/api/export.js%3a%3a$DATA',
+    '.env:stream',
+    'README.md::$DATA',
+  ]) {
+    const d = await check(r, edit(s));
+    assert.equal(d.status, 2, `stream ${s} should be denied`);
+    assert.match(d.stderr, /NTFS alternate data stream/);
+  }
+});
+
+test('Windows UNC and device namespace paths: extended prefixes and local shares', async () => {
+  const r = await setup();
+  const repoDrive = path.parse(r.root).root.replace(/[\\/]/g, '').toLowerCase();
+
+  // Extended-length drive path (\\?\C:\... and \\.\C:\...)
+  if (repoDrive.includes(':')) {
+    const driveLetter = repoDrive[0];
+    const relFromDrive = toPosix(path.resolve(r.root, 'src/api/export.js')).slice(2);
+    const uncExtended = `//?/${driveLetter}:${relFromDrive}`;
+    const devExtended = `//./${driveLetter}:${relFromDrive}`;
+    assert.equal((await check(r, edit(uncExtended))).status, 0);
+    assert.equal((await check(r, edit(devExtended))).status, 0);
+
+    // Unowned via UNC extended
+    const unownedUnc = `//?/${driveLetter}:${toPosix(path.resolve(r.root, 'README.md')).slice(2)}`;
+    assert.equal((await check(r, edit(unownedUnc))).status, 2);
+  }
+
+  // Device namespaces and extended UNC forms are denied
+  const devPipe = await check(r, edit('//./pipe/named-pipe'));
+  assert.equal(devPipe.status, 2);
+  assert.match(devPipe.stderr, /device or extended-length/);
+
+  const devDisk = await check(r, edit('//./PhysicalDrive0'));
+  assert.equal(devDisk.status, 2);
+  assert.match(devDisk.stderr, /device or extended-length/);
+
+  const devUnc = await check(r, edit('//?/UNC/localhost/c$/file.txt'));
+  assert.equal(devUnc.status, 2);
+  assert.match(devUnc.stderr, /device or extended-length/);
+
+  // Local shares without administrative C$ are denied
+  const localShare = await check(r, edit('//localhost/myshare/export.js'));
+  assert.equal(localShare.status, 2);
+  assert.match(localShare.stderr, /local network share/);
+
+  // Remote network UNC paths are treated as outside the repository
+  const remoteUnc = await check(r, edit('//remote-host/share/export.js'));
+  assert.equal(remoteUnc.status, 0);
+});
+
+test('redundant trailing slashes, dots, and spaces', async () => {
+  const r = await setup();
+  // Trailing dots and spaces on owned files resolve to the file (Win32 behavior)
+  assert.equal((await check(r, edit('src/api/export.js.'))).status, 0);
+  assert.equal((await check(r, edit('src/api/export.js...'))).status, 0);
+  assert.equal((await check(r, edit('src/api/export.js   '))).status, 0);
+  assert.equal((await check(r, edit('src/api/export.js/'))).status, 0);
+  assert.equal((await check(r, edit('src/api/export.js/.'))).status, 0);
+
+  // Trailing dots on unowned and protected files are still denied
+  assert.equal((await check(r, edit('README.md.'))).status, 2);
+  assert.equal((await check(r, edit('README.md...'))).status, 2);
+  assert.equal((await check(r, edit('.env.'))).status, 2);
+  assert.equal((await check(r, edit('.env...'))).status, 2);
+  assert.equal((await check(r, edit('.env   '))).status, 2);
+
+  // Invalid dot sequences (3+ dots as directory name) are rejected
+  const dotSeq = await check(r, edit('src/api/.../export.js'));
+  assert.equal(dotSeq.status, 2);
+  assert.match(dotSeq.stderr, /invalid dot\/space sequence/);
+});
+
+test('nested payload shapes: nested file objects, edits arrays, and file URLs', async () => {
+  const r = await setup();
+
+  // Nested file object
+  assert.equal((await check(r, { tool_input: { file: { path: 'src/api/export.js' } } })).status, 0);
+  assert.equal((await check(r, { tool_input: { target: { file_path: 'README.md' } } })).status, 2);
+
+  // Multiple and nested edits arrays
+  assert.equal((await check(r, { tool_input: { edits: [{ edits: [{ file_path: 'src/api/export.js' }] }] } })).status, 0);
+  assert.equal((await check(r, { tool_input: { edits: [{ edits: [{ file_path: 'README.md' }] }] } })).status, 2);
+
+  // Files array with objects
+  assert.equal((await check(r, { tool_input: { files: [{ path: 'src/api/export.js' }] } })).status, 0);
+  assert.equal((await check(r, { tool_input: { files: [{ path: 'README.md' }] } })).status, 2);
+
+  // source_file / dest_file keys
+  assert.equal((await check(r, { tool_input: { source_file: 'src/api/export.js', dest_file: 'src/api/export.js' } })).status, 0);
+  assert.equal((await check(r, { tool_input: { source_file: 'src/api/export.js', dest_file: 'README.md' } })).status, 2);
+
+  // file:// URI
+  const absOwnedPosix = toPosix(path.resolve(r.root, 'src/api/export.js'));
+  assert.equal((await check(r, { tool_input: { uri: `file:///${absOwnedPosix.replace(/^\//, '')}` } })).status, 0);
+  const absUnownedPosix = toPosix(path.resolve(r.root, 'README.md'));
+  assert.equal((await check(r, { tool_input: { uri: `file:///${absUnownedPosix.replace(/^\//, '')}` } })).status, 2);
+});
+
+test('fail-closed in block mode vs fail-open in warn mode for unknown payloads and invalid JSON', async () => {
+  const r = await setup('block');
+
+  // Block mode fails closed on invalid JSON
+  const badJsonBlock = await check(r, '{corrupt json');
+  assert.equal(badJsonBlock.status, 2);
+  assert.match(badJsonBlock.stderr, /failing closed in block mode/);
+
+  // Block mode fails closed on unknown payload shape with no extractable path
+  const unknownBlock = await check(r, { tool_name: 'mystery_mutation_tool', tool_input: { payload: 'xyz' } });
+  assert.equal(unknownBlock.status, 2);
+  assert.match(unknownBlock.stderr, /unknown payload shape/);
+
+  // Block mode fails closed on write tool without path
+  const writeMissingPath = await check(r, { tool_name: 'Write', tool_input: { content: 'hello' } });
+  assert.equal(writeMissingPath.status, 2);
+  assert.match(writeMissingPath.stderr, /unknown payload shape/);
+
+  // Warn mode fails open with a warning on stderr
+  const w = await setup('warn');
+  const badJsonWarn = await check(w, '{corrupt json');
+  assert.equal(badJsonWarn.status, 0);
+  assert.match(badJsonWarn.stderr, /fail open/);
+
+  const unknownWarn = await check(w, { tool_name: 'mystery_mutation_tool', tool_input: { payload: 'xyz' } });
+  assert.equal(unknownWarn.status, 0);
+  assert.match(unknownWarn.stderr, /fail open/);
+
+  // Explicit config.guard.failClosed override
+  const rExplicitFalse = makeTempRepo({ git: true, config: sampleConfig({ guard: { mode: 'block', failClosed: false } }), plan: true });
+  cleanups.push(() => rExplicitFalse.cleanup());
+  const failOpenOverride = await check(rExplicitFalse, '{corrupt json');
+  assert.equal(failOpenOverride.status, 0);
+  assert.match(failOpenOverride.stderr, /fail open/);
+});
+
+test('protected paths are unconditionally denied in block mode regardless of packet ownership', async () => {
+  // Plan packet claiming wildcard '**' and explicit '.env'
+  const r = makeTempRepo({
+    git: true,
+    config: sampleConfig({ guard: { mode: 'block' } }),
+    plan: {
+      schema: 1,
+      title: 'Wildcard Packet',
+      orchestrator: 'claude',
+      packets: [{ id: 'WP-WILDCARD', title: 'Owns everything', by: 'codex', owns: ['**', '.env', 'secrets/**'] }],
+    },
+  });
+  cleanups.push(() => r.cleanup());
+  assert.equal((await cli(r.root, ['begin', 'WP-WILDCARD', '--agent', 'codex'])).status, 0);
+
+  // Even with owns: ['**'], protected paths must be unconditionally denied
+  for (const p of ['.env', '.git/config', 'secrets/key.pem', 'certs/server.key', 'data/app.sqlite']) {
+    const d = await check(r, edit(p));
+    assert.equal(d.status, 2, `${p} must be denied despite packet ownership`);
+    assert.match(d.stderr, /protected/);
+    assert.match(d.stderr, /Protected paths \(secrets, credentials, databases, \.git\) cannot be edited\./);
+  }
+
+  // Normal files owned under '**' remain allowed
+  assert.equal((await check(r, edit('src/anything.js'))).status, 0);
 });
