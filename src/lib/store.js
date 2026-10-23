@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { BatonError } from './errors.js';
+import zlib from 'node:zlib';
+import { BatonError, UsageError } from './errors.js';
 import { commonDir } from './git.js';
 import { withLock } from './lock.js';
-import { utcnow, stamp, sha256, canonicalJson, ensureDir, writeFileAtomic, readJson } from './util.js';
+import { utcnow, stamp, sha256, canonicalJson, ensureDir, writeFileAtomic, readJson, parseTime } from './util.js';
 import { LEDGER_VERSION, EVENT_KINDS, EVENT_ID_RE, validateEventSchema } from './event-schema.js';
 import { verifyEventAttestation } from './attestation.js';
 import { resolveExecutionProvenance } from './provenance.js';
@@ -29,6 +30,7 @@ export function stateSub(root, name) {
 
 export function ledgerDir(root) { return path.join(root, '.baton', 'ledger'); }
 export function eventsDir(root) { return path.join(stateDir(root), 'events'); }
+export function archivesDir(root) { return path.join(root, '.baton', 'archives'); }
 
 function mirrorEnabled(root) {
   try {
@@ -227,7 +229,7 @@ export function appendEvent(root, partial) {
     const prior = existing.filter((item) => eventStream(item) === stream);
     const parent = prior[prior.length - 1];
     ev.rev = Math.max(prior.length, ...prior.map((item) => item.rev || 0)) + 1;
-    ev.parents = parent ? [parent.id] : [];
+    ev.parents = Array.isArray(partial.parents) ? [...partial.parents] : (parent ? [parent.id] : []);
     ev.sha = eventSha(ev);
     const schemaProblems = validateEventSchema(ev, { allowLegacy: false });
     if (schemaProblems.length) throw new BatonError(`invalid ${ev.kind} event: ${schemaProblems.join('; ')}`, { code: 'BAD_EVENT_SCHEMA' });
@@ -678,5 +680,394 @@ export function exportLedger(root, { dryRun = false } = {}) {
   return withLock(stateDir(root), () => {
     const { copied, skipped } = copyValid(eventsDir(root), ledgerDir(root), { dryRun });
     return { exported: copied, skipped };
+  });
+}
+
+/**
+ * Analyzes the ledger to partition events into protected live records vs candidate historical events
+ * eligible for archival, and calculates safe pruning boundaries preserving causal DAG invariants.
+ *
+ * Retention safeguards enforced:
+ * - Active packets (IN_PROGRESS, BLOCKED, etc.) can never be archived or pruned.
+ * - Active claims (unexpired leases, active begin events, unreleased CLAIM bus messages) can never be archived or pruned.
+ * - Unresolved findings (BLOCKER, MAJOR, MINOR open/unconfirmed) can never be archived or pruned.
+ * - Causal ancestors of any retained events remaining in the active store can never be pruned.
+ */
+export function analyzeRetention(root, events, { before = null } = {}) {
+  const beforeTime = before ? parseTime(before) : null;
+  const planFile = path.join(root, '.baton', 'plan.json');
+  const plan = fs.existsSync(planFile) ? readJson(planFile, null) : null;
+
+  // 1. Packet state derivation
+  const packetStates = new Map();
+  if (plan?.packets && Array.isArray(plan.packets)) {
+    for (const p of plan.packets) {
+      packetStates.set(p.id, { id: p.id, status: 'PLANNED', by: null, leaseUntil: null });
+    }
+  }
+
+  for (const ev of orderEvents(events)) {
+    if (!ev.packet) continue;
+    const s = packetStates.get(ev.packet) || { id: ev.packet, status: 'PLANNED', by: null, leaseUntil: null };
+    if (ev.to) s.status = ev.to;
+    if (ev.kind === 'begin') {
+      s.status = 'IN_PROGRESS';
+      s.by = ev.by || null;
+      s.leaseUntil = ev.data?.lease_until || null;
+    } else if (ev.kind === 'heartbeat') {
+      s.leaseUntil = ev.data?.lease_until || s.leaseUntil;
+      s.by = s.by || ev.by;
+    } else if (ev.kind === 'handoff' && ev.to === 'BLOCKED') {
+      s.status = 'BLOCKED';
+      s.by = null;
+      s.leaseUntil = null;
+    } else if (ev.kind === 'verdict') {
+      s.status = ev.to;
+    }
+    packetStates.set(ev.packet, s);
+  }
+
+  // 2. Active packets: any packet whose status is IN_PROGRESS, BLOCKED, or not terminal (ACCEPTED / ACCEPTED_WITH_FIXES)
+  const activePackets = new Set();
+  const TERMINAL = new Set(['ACCEPTED', 'ACCEPTED_WITH_FIXES']);
+  for (const [pid, s] of packetStates.entries()) {
+    if (s.status === 'IN_PROGRESS' || s.status === 'BLOCKED' || !TERMINAL.has(s.status)) {
+      activePackets.add(pid);
+    }
+  }
+
+  // 3. Unresolved findings (BLOCKER, MAJOR, MINOR open / unresolved)
+  const findings = new Map();
+  for (const ev of events) {
+    const d = ev.data || {};
+    if (ev.kind === 'finding') {
+      findings.set(d.fid, {
+        fid: d.fid,
+        packet: ev.packet,
+        severity: d.severity || 'MINOR',
+        status: 'open',
+        eventIds: [ev.id],
+      });
+    } else if (ev.kind === 'finding_resolved') {
+      const f = findings.get(d.fid);
+      if (f) {
+        f.eventIds.push(ev.id);
+        if (d.confirm) {
+          f.status = 'closed';
+        } else if (d.resolution === 'invalid') {
+          f.status = 'closed';
+        } else {
+          f.status = 'resolved';
+        }
+      }
+    }
+  }
+
+  const unresolvedFindingEventIds = new Set();
+  for (const f of findings.values()) {
+    if (f.status !== 'closed') {
+      for (const eid of f.eventIds) unresolvedFindingEventIds.add(eid);
+      if (f.packet) activePackets.add(f.packet);
+    }
+  }
+
+  // 4. Identify all protected events
+  const protectedEventIds = new Set();
+  for (const ev of events) {
+    if (ev.packet && activePackets.has(ev.packet)) {
+      protectedEventIds.add(ev.id);
+    }
+    if (unresolvedFindingEventIds.has(ev.id)) {
+      protectedEventIds.add(ev.id);
+    }
+    if (ev.kind === 'begin' && ev.packet && activePackets.has(ev.packet)) {
+      protectedEventIds.add(ev.id);
+    }
+    if (ev.kind === 'message') {
+      if (ev.packet && activePackets.has(ev.packet)) {
+        protectedEventIds.add(ev.id);
+      }
+      if (ev.data?.type === 'CLAIM' && ev.packet && activePackets.has(ev.packet)) {
+        protectedEventIds.add(ev.id);
+      }
+    }
+  }
+
+  // 5. Candidate events for archival
+  const candidateEvents = events.filter((ev) => {
+    if (protectedEventIds.has(ev.id)) return false;
+    if (beforeTime) {
+      const t = parseTime(ev.ts);
+      if (t && t >= beforeTime) return false;
+    }
+    return true;
+  });
+
+  // 6. Prune safety: Candidate events that are ancestors of retained events CANNOT be pruned
+  const candidateIds = new Set(candidateEvents.map((e) => e.id));
+  const retainedEvents = events.filter((e) => !candidateIds.has(e.id));
+  const byId = new Map(events.map((e) => [e.id, e]));
+  const retainedAncestors = new Set();
+  const queue = [...retainedEvents.map((e) => e.id)];
+  while (queue.length > 0) {
+    const id = queue.pop();
+    const ev = byId.get(id);
+    if (!ev) continue;
+    for (const p of ev.parents || []) {
+      if (!retainedAncestors.has(p)) {
+        retainedAncestors.add(p);
+        queue.push(p);
+      }
+    }
+  }
+
+  const pruneableEvents = candidateEvents.filter((e) => !retainedAncestors.has(e.id));
+
+  return {
+    activePackets,
+    protectedEventIds,
+    candidateEvents,
+    pruneableEvents,
+  };
+}
+
+/**
+ * Safely bundles sealed historical ledger events into an integrity-checksummed archive.
+ *
+ * Safeguards:
+ * - Refuses to archive live records (active packets, active claims, unresolved findings).
+ * - Refuses to prune without explicit opt-in confirmation (`--prune` and `--confirm`).
+ * - Never prunes causal ancestors required by retained events in the active store.
+ * - Supports verifiable canonical JSON or compressed (.gz / .tar.gz) output.
+ */
+export function archiveLedger(root, { before = null, out = null, prune = false, confirm = false, dryRun = false } = {}) {
+  if (before && !parseTime(before)) {
+    throw new UsageError(`--before must be an ISO timestamp, got "${before}"`);
+  }
+  if (prune && !confirm) {
+    throw new BatonError('pruning from active ledger requires explicit confirmation; pass --confirm with --prune', {
+      code: 'PRUNE_CONFIRMATION_REQUIRED',
+      hint: 'pruning permanently removes archived events from .baton/ledger/ and local state; pass --confirm to authorize',
+    });
+  }
+
+  return withLock(stateDir(root), () => {
+    assertSensitiveReplay(root, { action: 'ledger archival' });
+
+    const events = readEvents(root);
+    const { protectedEventIds, candidateEvents, pruneableEvents } = analyzeRetention(root, events, { before });
+
+    const now = utcnow();
+    const ts = stamp(now);
+    const prefix = ts.replace(/[-:]/g, '');
+    const suffix = crypto.randomBytes(3).toString('hex');
+    const archiveId = `ARCH-${prefix}-${suffix}`;
+
+    let outPath = out;
+    if (!outPath) {
+      outPath = path.join(archivesDir(root), `ledger-${prefix}-${suffix}.json`);
+    } else {
+      outPath = path.resolve(outPath);
+    }
+
+    if (candidateEvents.length === 0) {
+      return {
+        ok: true,
+        dryRun: Boolean(dryRun),
+        archiveFile: null,
+        archiveId,
+        checksum: null,
+        counts: { archived: 0, protected: protectedEventIds.size, pruned: 0 },
+        archived: [],
+        protected: [...protectedEventIds],
+        pruned: [],
+        note: 'no eligible historical events to archive',
+      };
+    }
+
+    const orderedCandidates = orderEvents(candidateEvents);
+    const manifest = orderedCandidates.map((e) => ({
+      id: e.id,
+      sha: e.sha,
+      ts: e.ts,
+      kind: e.kind,
+      packet: e.packet || null,
+    }));
+    const checksum = sha256(canonicalJson(orderedCandidates));
+
+    const bundle = {
+      format: 'baton-ledger-archive',
+      version: 1,
+      archive_id: archiveId,
+      created_at: ts,
+      before: before || null,
+      generator: 'baton ledger archive',
+      counts: {
+        events: orderedCandidates.length,
+        manifest: manifest.length,
+      },
+      manifest,
+      events: orderedCandidates,
+      checksum,
+    };
+
+    if (!dryRun) {
+      ensureDir(path.dirname(outPath));
+      if (outPath.endsWith('.gz') || outPath.endsWith('.tar.gz')) {
+        fs.writeFileSync(outPath, zlib.gzipSync(Buffer.from(canonicalJson(bundle), 'utf8')));
+      } else {
+        writeFileAtomic(outPath, JSON.stringify(bundle, null, 2) + '\n');
+      }
+
+      if (prune) {
+        const localDir = eventsDir(root);
+        const mirrorDir = ledgerDir(root);
+        for (const ev of pruneableEvents) {
+          const lf = path.join(localDir, `${ev.id}.json`);
+          const mf = path.join(mirrorDir, `${ev.id}.json`);
+          try { if (fs.existsSync(lf)) fs.unlinkSync(lf); } catch {}
+          try { if (fs.existsSync(mf)) fs.unlinkSync(mf); } catch {}
+          parseCache.delete(lf);
+          parseCache.delete(mf);
+        }
+      }
+    }
+
+    return {
+      ok: true,
+      dryRun: Boolean(dryRun),
+      archiveFile: outPath,
+      archiveId,
+      checksum,
+      counts: {
+        archived: orderedCandidates.length,
+        protected: protectedEventIds.size,
+        pruned: prune ? pruneableEvents.length : 0,
+      },
+      archived: orderedCandidates.map((e) => e.id),
+      protected: [...protectedEventIds],
+      pruned: prune ? pruneableEvents.map((e) => e.id) : [],
+    };
+  });
+}
+
+/**
+ * Restores events from a verified archive bundle into the local store and tracked mirror.
+ *
+ * Safeguards:
+ * - Verifies archive schema, version, and global SHA-256 archive checksum.
+ * - Verifies every contained event's cryptographic SHA-256 and schema validity.
+ * - Detects conflicts if an existing event with the same ID has a differing hash (tampering).
+ * - Fails closed on any corruption or integrity error.
+ */
+export function restoreLedger(root, archiveFile, { dryRun = false } = {}) {
+  const filePath = path.resolve(archiveFile);
+  if (!fs.existsSync(filePath)) {
+    throw new BatonError(`archive file not found: ${filePath}`, { code: 'ARCHIVE_NOT_FOUND' });
+  }
+
+  const raw = fs.readFileSync(filePath);
+  let text;
+  if (raw.length >= 2 && raw[0] === 0x1f && raw[1] === 0x8b) {
+    try {
+      text = zlib.gunzipSync(raw).toString('utf8');
+    } catch (e) {
+      throw new BatonError(`archive gzip decompression failed: ${e.message}`, { code: 'ARCHIVE_CORRUPT' });
+    }
+  } else {
+    text = raw.toString('utf8');
+  }
+
+  let bundle;
+  try {
+    bundle = JSON.parse(text);
+  } catch (e) {
+    throw new BatonError(`archive is corrupt or not valid JSON: ${e.message}`, { code: 'ARCHIVE_CORRUPT' });
+  }
+
+  if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)) {
+    throw new BatonError('invalid archive format: root must be a JSON object', { code: 'ARCHIVE_CORRUPT' });
+  }
+  if (bundle.format !== 'baton-ledger-archive' || bundle.version !== 1 || !Array.isArray(bundle.events)) {
+    throw new BatonError('invalid archive format or unsupported version', { code: 'ARCHIVE_CORRUPT' });
+  }
+
+  const expectedChecksum = sha256(canonicalJson(bundle.events));
+  if (bundle.checksum !== expectedChecksum) {
+    throw new BatonError(
+      `archive integrity check failed: checksum mismatch (expected ${expectedChecksum}, got ${bundle.checksum})`,
+      { code: 'ARCHIVE_INTEGRITY_COMPROMISED' }
+    );
+  }
+
+  for (const ev of bundle.events) {
+    if (!ev || typeof ev !== 'object') {
+      throw new BatonError('corrupt event in archive: item must be an object', { code: 'ARCHIVE_INTEGRITY_COMPROMISED' });
+    }
+    if (!ev.id || !EVENT_ID_RE.test(ev.id)) {
+      throw new BatonError(`corrupt event in archive: invalid id "${ev?.id}"`, { code: 'ARCHIVE_INTEGRITY_COMPROMISED' });
+    }
+    if (!ev.sha || eventSha(ev) !== ev.sha) {
+      throw new BatonError(`archive integrity check failed: sha mismatch on event ${ev.id}`, { code: 'ARCHIVE_INTEGRITY_COMPROMISED' });
+    }
+    const schemaProblems = validateEventSchema(ev);
+    if (schemaProblems.length) {
+      throw new BatonError(`archive integrity check failed: invalid event schema on ${ev.id}: ${schemaProblems.join('; ')}`, { code: 'ARCHIVE_INTEGRITY_COMPROMISED' });
+    }
+  }
+
+  return withLock(stateDir(root), () => {
+    const localStoreDir = eventsDir(root);
+    const localMirrorDir = ledgerDir(root);
+    const mirror = mirrorEnabled(root);
+
+    // Conflict check
+    for (const ev of bundle.events) {
+      const localFile = path.join(localStoreDir, `${ev.id}.json`);
+      if (fs.existsSync(localFile)) {
+        const { ev: existingEv } = readEventFile(localFile);
+        if (existingEv && existingEv.sha !== ev.sha) {
+          throw new BatonError(`conflict: existing local event ${ev.id} hash differs from archive event hash`, { code: 'ARCHIVE_INTEGRITY_COMPROMISED' });
+        }
+      }
+    }
+
+    const restored = [];
+    const alreadyPresent = [];
+
+    for (const ev of bundle.events) {
+      const localFile = path.join(localStoreDir, `${ev.id}.json`);
+      const mirrorFile = path.join(localMirrorDir, `${ev.id}.json`);
+      const text = JSON.stringify(ev, null, 2) + '\n';
+      const existsLocally = fs.existsSync(localFile);
+
+      if (existsLocally) {
+        alreadyPresent.push(ev.id);
+      } else {
+        restored.push(ev.id);
+      }
+
+      if (!dryRun) {
+        if (!existsLocally) {
+          writeFileAtomic(localFile, text);
+        }
+        if (mirror && !fs.existsSync(mirrorFile)) {
+          writeFileAtomic(mirrorFile, text);
+        }
+        parseCache.delete(localFile);
+        parseCache.delete(mirrorFile);
+      }
+    }
+
+    return {
+      ok: true,
+      dryRun: Boolean(dryRun),
+      archiveFile: filePath,
+      archiveId: bundle.archive_id,
+      checksum: bundle.checksum,
+      total: bundle.events.length,
+      restored,
+      alreadyPresent,
+    };
   });
 }

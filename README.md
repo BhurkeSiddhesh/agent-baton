@@ -344,6 +344,7 @@ codex       0      0    0      0    0       0           -          1(9)
 - [Engineering roadmap](docs/ROADMAP.md) - issue buckets, autonomous MVP critical path and release phases
 - [Concepts](docs/CONCEPTS.md) - agents, tracks, packets, gates, ledger, bus
 - [Workflow](docs/WORKFLOW.md) - the full lifecycle and the review rules
+- [Ledger retention and archival](docs/RETENTION.md) - safe retention horizons, archive format, restoration procedures and privacy tradeoffs
 - [Commands](docs/COMMANDS.md) - every command and flag, from the real `--help`
 - [Agents](docs/AGENTS.md) - per-agent setup, files written, custom agents
 - [Cloud agents](docs/CLOUD.md) - ledger mirror, branches, dispatch, GitHub workflows

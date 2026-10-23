@@ -836,14 +836,20 @@ baton ledger verify [--json]                              check hashes and local
        baton ledger import [--from <dir>] [--dry-run] [--json]    copy safe events from tracked mirror (or <dir>) into local store
        baton ledger export [--dry-run] [--json]                  copy valid local events into the tracked mirror (.baton/ledger/)
        baton ledger reconcile [--from <dir>] [--dry-run] [--json] reconcile diverged clone ledgers and incomplete operations
+       baton ledger archive [--before <iso>] [--out <file>] [--prune] [--confirm] [--dry-run] [--json] archive sealed events
+       baton ledger restore <archive-file> [--dry-run] [--json]   restore archived events to local store and tracked mirror
 
 Import, export and verify the event ledger
 
 Options:
-      --from <v>  import/reconcile: directory of event files (default .baton/ledger)
-      --dry-run   simulate reconciliation without writing changes to disk
-      --json      print a JSON document
-  -h, --help      show this help
+      --from <v>    import/reconcile: directory of event files (default .baton/ledger)
+      --before <v>  archive: only archive events created before this ISO timestamp
+      --out <v>     archive: destination archive bundle path
+      --prune       archive: prune archived events from active ledger (requires --confirm)
+      --confirm     archive: confirm destructive pruning from active ledger
+      --dry-run     simulate operations without writing changes to disk
+      --json        print a JSON document
+  -h, --help        show this help
 ```
 
 ## Global help
