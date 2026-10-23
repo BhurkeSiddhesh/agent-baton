@@ -2,7 +2,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const REQUIRED_CI_JOBS = Object.freeze(['test', 'unit', 'integration', 'security', 'package', 'smoke', 'docs']);
+export const REQUIRED_CI_JOBS = Object.freeze(['test', 'git_baseline', 'unit', 'integration', 'security', 'package', 'smoke', 'docs']);
 
 export function evaluateRequiredResults(results) {
   if (!Array.isArray(results) || results.length !== REQUIRED_CI_JOBS.length) {

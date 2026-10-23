@@ -11,8 +11,8 @@ test('branch protection aggregator rejects anything except all success', () => {
   assert.ok(gate, 'missing PR/main branch gate');
   assert.match(gate, /name: branch protection gate \(all required CI checks\)/);
   assert.match(gate, /if: always\(\) && !startsWith\(github\.ref, 'refs\/tags\/v'\)/);
-  assert.match(gate, /needs: \[test, unit, integration, security, package, smoke, docs\]/);
-  for (const job of ['test', 'unit', 'integration', 'security', 'package', 'smoke', 'docs']) {
+  assert.match(gate, /needs: \[test, git_baseline, unit, integration, security, package, smoke, docs\]/);
+  for (const job of ['test', 'git_baseline', 'unit', 'integration', 'security', 'package', 'smoke', 'docs']) {
     assert.ok(gate.includes('needs.' + job + '.result'), 'gate omitted ' + job);
   }
   assert.match(gate, /assert-required-ci\.mjs/);
@@ -37,7 +37,7 @@ test('branch gate rejects simulated failure, cancellation, skip and missing jobs
   assert.equal(evaluateRequiredResults(statuses).ok, true);
   for (const state of ['failure', 'cancelled', 'skipped', 'pending', '']) {
     const incorrect = [...statuses];
-    incorrect[3] = state;
+    incorrect[4] = state;
     const result = evaluateRequiredResults(incorrect);
     assert.equal(result.ok, false, 'unexpectedly accepted ' + JSON.stringify(state));
     assert.match(result.failed.join(', '), /security=/);

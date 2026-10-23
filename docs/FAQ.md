@@ -34,7 +34,7 @@ Yes: Windows, macOS and Linux, Node 18, 20 and 22 are tested in CI. Paths are no
 no command assumes `sh`. `init` writes `.baton/baton.cmd` next to the `sh` shim. Test output is decoded as UTF-8, so
 OEM-codepage output from `cmd` may look garbled.
 
-For the exact, CI-verified operating-system/Node and Windows shell combinations, see [compatibility](COMPATIBILITY.md). Git 2.30+ is the intended compatibility target but the minimum has not yet been tested with a pinned Git runner.
+For the exact, CI-verified operating-system/Node and Windows shell combinations, see [compatibility](COMPATIBILITY.md). The required Debian 11 compatibility lane tests the Git 2.30 series directly; newer hosted-runner Git versions are covered by the OS matrix.
 
 ## Which agents are supported?
 

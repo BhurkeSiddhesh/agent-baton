@@ -37,7 +37,7 @@ test('tag candidate job depends on release gate and fails closed for all bad sta
   const candidate = ci.split(/^  release_candidate:\s*$/m)[1]?.split(/^  branch_ready:\s*$/m)[0];
   assert.ok(release && candidate, 'missing tagged release gates');
   assert.match(release, /if: always\(\) && startsWith\(github\.ref, 'refs\/tags\/v'\)/);
-  assert.match(release, /needs: \[test, unit, integration, security, package, smoke, docs\]/);
+  assert.match(release, /needs: \[test, git_baseline, unit, integration, security, package, smoke, docs\]/);
   assert.match(release, /assert-required-ci\.mjs/);
   assert.match(release, /assert-release-tag\.mjs/);
   assert.match(candidate, /needs: \[release_ready\]/);

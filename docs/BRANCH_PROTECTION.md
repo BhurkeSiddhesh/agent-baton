@@ -9,7 +9,7 @@
 1. As a repository administrator open **Settings → Rules → Rulesets → New branch ruleset**, set enforcement to **Active**, and target `main` plus `release/*` (create the latter only if the project uses release branches).
 2. Require a pull request before merging, block force pushes and deletions, require resolved conversations, and require successful checks on the latest PR head. Enable checks from an expected source (GitHub Actions) where GitHub offers that option.
 3. Require **both** exact check names from a recent successful PR:
-   - `branch protection gate (all required CI checks)` — waits for full OS/Node matrix, unit, integration, security, smoke, docs and offline package checks; fails when any prerequisite is skipped, cancelled or failed.
+   - `branch protection gate (all required CI checks)` — waits for the full OS/Node matrix, Git 2.30 baseline, unit, integration, security, smoke, docs and offline package checks; fails when any prerequisite is skipped, cancelled or failed.
    - `test coverage baseline (node 20)` — separate coverage workflow, with machine-readable artifacts.
 4. Prefer one independent human approval for sensitive changes. A sole maintainer cannot approve their own PR. If no independent reviewer is available, disclose that limitation, retain PR plus mandatory checks, and establish a narrowly scoped documented emergency bypass rather than silently claiming independent review.
 5. Set bypass permissions narrowly. Do not give ordinary coding agents, automation tokens or all contributors an unrestricted bypass. Record exceptional bypass use with commit SHA, reason, approving person, rollback plan and subsequent independent review. Check effective permissions for GitHub Apps separately.
