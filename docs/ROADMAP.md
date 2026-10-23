@@ -1,10 +1,73 @@
 # Agent Baton engineering roadmap
 
-This index links the **88 individually tracked engineering issues** created from the October 13, 2026 architecture review. Each issue includes implementation checklists, acceptance criteria, likely code areas and prerequisite task IDs.
+This index groups the original **88 engineering issues** created from the October 13, 2026 architecture review and
+the product-level work added after the autonomous-orchestration reset. The issue count is not the plan: the ordered
+critical path below is the plan, while the detailed buckets remain the implementation inventory.
 
-**Status:** 88 tracked issues; **BAT-001, BAT-002 and BAT-003 completed** in [CI stabilization PR #90](https://github.com/BhurkeSiddhesh/agent-baton/pull/90) (all 13 GitHub Actions jobs passed on `main` on October 13, 2026). Other items remain proposed unless their GitHub issue is closed. **Prioritization:** P0 = correctness/release blocker; P1 = core capability; P2 = usability/scale; P3 = optional provider expansion. M1–M5 milestones in issue bodies are *planning phases*, not configured GitHub Milestone objects.
+**Status:** 97 tracked engineering items: the original BAT-001–088 backlog plus BAT-089–097 from the product
+reset. GitHub issue state is authoritative for completion; this document supplies grouping and sequence. **Priority:**
+P0 = critical-path correctness or release blocker; P1 = core capability; P2 = usability/scale; P3 = optional
+expansion. M1–M5 are delivery phases, not claims that corresponding GitHub milestones exist.
 
-**How to execute this roadmap:** Work through release stabilization and security before enabling unattended execution. The existing CLI coordinates workers, but its adapters do not automatically start coding-agent sessions. See the [README feature walkthrough](../README.md#from-a-feature-request-to-merged-code-who-orchestrates-and-how-do-agents-pick-up-work).
+**How to execute this roadmap:** Build one narrow autonomous vertical slice before broadening integrations or product
+polish. The existing CLI coordinates workers, but its adapters do not automatically start coding-agent sessions. The
+target is defined in [PRODUCT_VISION.md](PRODUCT_VISION.md); enterprise packaging is in
+[ENTERPRISE_CLOUD.md](ENTERPRISE_CLOUD.md).
+
+## Product-level workstreams
+
+The tracker is grouped with `area:*` labels. These buckets answer different questions and should not be treated as
+eight equally urgent queues:
+
+| Bucket | Existing issues | Purpose |
+|---|---:|---|
+| Foundation and release | BAT-001–009 | Supported installation, CI and reproducible releases |
+| Security and trust | BAT-010–021 | Execution boundaries, identity, approvals and adversarial safety |
+| Durable state | BAT-022–034 | Claims, leases, replay, reconciliation and crash safety |
+| Autonomous runtime | BAT-035–048 | Runners, worktrees, scheduler, heartbeats, review and recovery |
+| Delivery intelligence | BAT-049–061 | Planning, ownership, evidence, integration and release evaluation |
+| Operator experience | BAT-062–070 | Diagnostics, logs, metrics, console and notifications |
+| Integrations and performance | BAT-071–079 | Provider adapters, trackers, hosting and benchmarks |
+| Distribution and adoption | BAT-080–088 | Packaging, documentation, releases and outcome measurement |
+| Goal orchestration | New product issues | Goal contracts, lead-agent planning, replanning and product acceptance |
+| Enterprise cloud | New product issues | Control plane, worker plane, tenancy, identity, deployment and subscriptions |
+
+## Autonomous MVP critical path
+
+The first product milestone is not completion of every open P0/P1 issue. It is a safe, reproducible vertical slice:
+
+1. Define the goal contract and goal-level completion evaluator.
+2. Define the durable controller state machine and pluggable runner contract (BAT-035).
+3. Implement one supervised runner first, then a second provider (BAT-036).
+4. Create isolated packet worktrees and reliable claims (BAT-024, BAT-025, BAT-037).
+5. Run the persistent scheduler with wakeups, heartbeats, retries and recovery (BAT-038, BAT-041, BAT-042).
+6. Automate worker execution and independent review (BAT-039, BAT-040, BAT-055, BAT-056).
+7. Serialize integration and invalidate stale approvals (BAT-057, BAT-058, BAT-059).
+8. Give the lead orchestrator inspect/plan/replan authority while keeping mechanics deterministic.
+9. Add one browser/API acceptance adapter and close the loop against the original goal.
+10. Ship a reproducible feature-mode demo (BAT-048), then a greenfield demo.
+
+Until that slice works after controller restart and with a deliberately failed worker, dashboards, additional agent
+providers and broad SaaS infrastructure are secondary.
+
+## Product reset issues
+
+These issues fill gaps that were not explicit in the original component-oriented backlog:
+
+| Engineering ID | GitHub issue | Priority | Outcome |
+|---|---:|---:|---|
+| BAT-089 | [#110](https://github.com/BhurkeSiddhesh/agent-baton/issues/110) | P0 | Versioned goal contract and evidence-based completion evaluator |
+| BAT-090 | [#111](https://github.com/BhurkeSiddhesh/agent-baton/issues/111) | P0 | Lead orchestrator for inspect, plan, delegate and replan |
+| BAT-091 | [#112](https://github.com/BhurkeSiddhesh/agent-baton/issues/112) | P0 | Durable controller with event-driven wakeups and restart recovery |
+| BAT-092 | [#113](https://github.com/BhurkeSiddhesh/agent-baton/issues/113) | P1 | Capability broker for browser, MCP, cloud and deployment tools |
+| BAT-093 | [#114](https://github.com/BhurkeSiddhesh/agent-baton/issues/114) | P1 | Enterprise control plane and customer-connected worker plane |
+| BAT-094 | [#115](https://github.com/BhurkeSiddhesh/agent-baton/issues/115) | P1 | Enterprise tenancy, SSO, RBAC, secrets and audit controls |
+| BAT-095 | [#116](https://github.com/BhurkeSiddhesh/agent-baton/issues/116) | P1 | Operator console and human intervention workflow |
+| BAT-096 | [#117](https://github.com/BhurkeSiddhesh/agent-baton/issues/117) | P1 | Commercial entitlements, metering and subscription operations |
+| BAT-097 | [#118](https://github.com/BhurkeSiddhesh/agent-baton/issues/118) | P0 epic | Autonomous goal-to-outcome vertical slice |
+
+GitHub issue numbers are repository-wide and include pull requests, so they intentionally differ from the stable
+BAT engineering IDs.
 
 ## Issue intake and prioritization
 
@@ -71,14 +134,14 @@ Make claims, leases, event replay and recovery reliable across independent proce
 
 ## 04 — Autonomous agent execution
 
-Introduce an optional scheduler, runner interfaces and supervised build/review lifecycle.
+Introduce the persistent scheduler, runner interfaces and supervised build/review lifecycle required by the product.
 
 | Issue | Priority | Work item |
 |---|---|---|
 | [BAT-035](https://github.com/BhurkeSiddhesh/agent-baton/issues/35) | P1 | Define a stable pluggable agent runner interface |
 | [BAT-036](https://github.com/BhurkeSiddhesh/agent-baton/issues/36) | P1 | Implement supervised Claude Code and Codex CLI runners |
 | [BAT-037](https://github.com/BhurkeSiddhesh/agent-baton/issues/37) | P1 | Create per-packet isolated Git worktrees automatically |
-| [BAT-038](https://github.com/BhurkeSiddhesh/agent-baton/issues/38) | P1 | Build optional orchestration scheduler loop |
+| [BAT-038](https://github.com/BhurkeSiddhesh/agent-baton/issues/38) | P0 | Build persistent orchestration scheduler loop |
 | [BAT-039](https://github.com/BhurkeSiddhesh/agent-baton/issues/39) | P1 | Automate worker begin-build-verify-submit lifecycle |
 | [BAT-040](https://github.com/BhurkeSiddhesh/agent-baton/issues/40) | P1 | Launch independent reviewer sessions and record evidence |
 | [BAT-041](https://github.com/BhurkeSiddhesh/agent-baton/issues/41) | P1 | Add automatic heartbeats while runners remain healthy |
@@ -88,7 +151,7 @@ Introduce an optional scheduler, runner interfaces and supervised build/review l
 | [BAT-045](https://github.com/BhurkeSiddhesh/agent-baton/issues/45) | P1 | Bound concurrency and resource usage |
 | [BAT-046](https://github.com/BhurkeSiddhesh/agent-baton/issues/46) | P1 | Design optional process sandbox backend |
 | [BAT-047](https://github.com/BhurkeSiddhesh/agent-baton/issues/47) | P1 | Connect cloud dispatch to tracked remote execution |
-| [BAT-048](https://github.com/BhurkeSiddhesh/agent-baton/issues/48) | P1 | Ship reproducible multi-agent end-to-end demo |
+| [BAT-048](https://github.com/BhurkeSiddhesh/agent-baton/issues/48) | P0 | Ship reproducible autonomous goal-to-outcome demo |
 
 ## 05 — Planning, review and Git
 
@@ -160,10 +223,15 @@ Publish tested examples, package distribution, governance and success metrics.
 
 ## Release sequencing
 
-1. **M1 — Stable CLI:** Initial Windows, Node 18 and generated-doc failures are resolved (BAT-001–003); continue security hardening, branch protection, installer safety and release gates.
-2. **M2 — Trust + coordination:** Establish stronger identity policies and correct distributed claims, leases and replay.
-3. **M3 — Autonomous runner:** Implement optional process supervisors, worktree isolation, concurrency and end-to-end demo.
-4. **M4 — Integrations:** Harden GitHub handoffs, PR review, merge queue and interface compatibility.
-5. **M5 — Scale and adoption:** Polish tooling, benchmarks, docs, publication and additional optional integrations.
+1. **M1 — Trusted foundation:** Finish release, command-execution, identity, claim and crash-safety blockers required
+   to run agent processes without corrupting a repository.
+2. **M2 — Autonomous local MVP:** Deliver BAT-097 on one machine with two runner types, isolated worktrees,
+   independent review, browser acceptance and restart recovery.
+3. **M3 — Goal-to-outcome product:** Add greenfield/repair modes, stronger planning/replanning, broad tools and an
+   operator experience that removes routine terminal choreography.
+4. **M4 — Enterprise control plane:** Add remote workers, tenant/identity controls, Kubernetes portability and
+   reference AWS/Azure deployments.
+5. **M5 — Commercial readiness:** Add entitlements, billing operations, supportability, SLO/DR evidence, paid design
+   partners and only then broader self-serve SaaS scale.
 
 **Standard definition of done:** reviewed PR, regression tests including failure paths, passing relevant CI, evidence matching acceptance criteria, and updated user-facing documentation where behavior changes.
