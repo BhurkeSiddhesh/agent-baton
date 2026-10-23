@@ -319,17 +319,18 @@ Options:
 ### baton gate
 
 ```text
-baton gate <list|open|close> [id] --by <actor> [--note "..."] [--json]
+baton gate <list|open|close> [id] --by <actor> [--note "..."] [--op-id <id>] [--json]
 
 List, open or close human gates
 
 Gates are human decisions that block packets until opened. Only the gate owner or "human" may open or close one.
 
 Options:
-      --by <v>    who opens or closes the gate (the owner, or human)
-      --note <v>  reason recorded with the decision
-      --json      
-  -h, --help      show this help
+      --by <v>     who opens or closes the gate (the owner, or human)
+      --note <v>   reason recorded with the decision
+      --op-id <v>  idempotent operation id
+      --json       
+  -h, --help       show this help
 
 Examples:
   baton gate list
@@ -475,7 +476,7 @@ Options:
 ### baton begin
 
 ```text
-baton begin <packet> --agent <id> [--pull] [--expected-rev <rev>] [--json]
+baton begin <packet> --agent <id> [--pull] [--expected-rev <rev>] [--op-id <id>] [--json]
 
 Start (or restart) a packet: lease, snapshot and claim
 
@@ -483,6 +484,7 @@ Options:
   -a, --agent <v>         acting agent id (or BATON_AGENT)
       --pull              take a packet assigned to another agent (announced on the bus)
       --expected-rev <n>  CAS revision check: require exact packet stream revision
+      --op-id <v>         idempotent operation id
       --json              print a JSON document
   -h, --help              show this help
 ```
@@ -503,12 +505,13 @@ Options:
 ### baton reclaim
 
 ```text
-baton reclaim <packet> --agent <id> [--json]
+baton reclaim <packet> --agent <id> [--op-id <id>] [--json]
 
 Take over an in-progress packet whose lease expired
 
 Options:
   -a, --agent <v>  acting agent id (or BATON_AGENT)
+      --op-id <v>  idempotent operation id
       --json       print a JSON document
   -h, --help       show this help
 ```
@@ -516,7 +519,7 @@ Options:
 ### baton block
 
 ```text
-baton block <packet> --agent <id> --reason "..." [--question "..."] [--json]
+baton block <packet> --agent <id> --reason "..." [--question "..."] [--op-id <id>] [--json]
 
 Mark a packet BLOCKED with a reason and a question
 
@@ -524,6 +527,7 @@ Options:
   -a, --agent <v>     acting agent id (or BATON_AGENT)
       --reason <v>    why the packet cannot proceed (required)
       --question <v>  the specific question that unblocks it
+      --op-id <v>     idempotent operation id
       --json          print a JSON document
   -h, --help          show this help
 ```
@@ -544,6 +548,7 @@ Imported packet-specific test commands are untrusted; inspect them and pass --al
 Options:
       --allow-shell  explicitly run a packet-defined shell test command
       --no-tests     skip the test command (the result is never submittable)
+      --op-id <v>    idempotent operation id
       --json         print one JSON document
   -h, --help         show this help
 ```
@@ -551,13 +556,14 @@ Options:
 ### baton submit
 
 ```text
-baton submit <packet> --agent <id> [--note "..."] [--json]
+baton submit <packet> --agent <id> [--note "..."] [--op-id <id>] [--json]
 
 Request review (needs a current passing verify)
 
 Options:
   -a, --agent <v>  acting agent id (or BATON_AGENT)
       --note <v>   sign-off note for the reviewer
+      --op-id <v>  idempotent operation id
       --json       print a JSON document
   -h, --help       show this help
 ```
@@ -579,7 +585,7 @@ Options:
 ### baton accept
 
 ```text
-baton accept <packet> --by <reviewer> [--note "..."] [--score 0-10] [--json]
+baton accept <packet> --by <reviewer> [--note "..."] [--score 0-10] [--op-id <id>] [--json]
 
 Accept a reviewed packet (refused while BLOCKER/MAJOR findings are open)
 
@@ -588,6 +594,7 @@ Options:
   -a, --agent <v>  alias of --by
       --note <v>   verdict note
       --score <n>  quality score 0-10
+      --op-id <v>  idempotent operation id
       --json       print a JSON document
   -h, --help       show this help
 ```
@@ -595,7 +602,7 @@ Options:
 ### baton fix
 
 ```text
-baton fix <packet> --by <reviewer> [--note "..."] [--score 0-10] [--json]
+baton fix <packet> --by <reviewer> [--note "..."] [--score 0-10] [--op-id <id>] [--json]
 
 Accept with fixes: the author must resolve the findings
 
@@ -604,6 +611,7 @@ Options:
   -a, --agent <v>  alias of --by
       --note <v>   what must be fixed
       --score <n>  quality score 0-10
+      --op-id <v>  idempotent operation id
       --json       print a JSON document
   -h, --help       show this help
 ```
@@ -611,7 +619,7 @@ Options:
 ### baton reject
 
 ```text
-baton reject <packet> --by <reviewer> --note "..." [--score 0-10] [--json]
+baton reject <packet> --by <reviewer> --note "..." [--score 0-10] [--op-id <id>] [--json]
 
 Reject a reviewed packet (needs a note or at least one finding)
 
@@ -620,6 +628,7 @@ Options:
   -a, --agent <v>  alias of --by
       --note <v>   why it is rejected
       --score <n>  quality score 0-10
+      --op-id <v>  idempotent operation id
       --json       print a JSON document
   -h, --help       show this help
 ```
@@ -654,7 +663,7 @@ Options:
 ### baton reassign
 
 ```text
-baton reassign <packet> --reviewer <id> --by <orchestrator> [--json]
+baton reassign <packet> --reviewer <id> --by <orchestrator> [--op-id <id>] [--json]
 
 Change the reviewer of an undecided packet (orchestrator)
 
@@ -662,6 +671,7 @@ Options:
       --reviewer <v>  new reviewer id
       --by <v>        the orchestrator (or BATON_AGENT)
   -a, --agent <v>     alias of --by
+      --op-id <v>     idempotent operation id
       --json          print a JSON document
   -h, --help          show this help
 ```
@@ -669,7 +679,7 @@ Options:
 ### baton handoff
 
 ```text
-baton handoff <packet> --to <agent> --by <agent> [--note "..."] [--json]
+baton handoff <packet> --to <agent> --by <agent> [--note "..."] [--op-id <id>] [--json]
 
 Hand a packet to another author (releases it when in progress)
 
@@ -678,6 +688,7 @@ Options:
       --by <v>     current author/holder or the orchestrator (or BATON_AGENT)
   -a, --agent <v>  alias of --by
       --note <v>   context for the new author
+      --op-id <v>  idempotent operation id
       --json       print a JSON document
   -h, --help       show this help
 ```
@@ -810,6 +821,7 @@ Options:
 baton ledger verify [--json]            check hashes and local/mirror agreement (exit 1 on unacknowledged errors)
        baton ledger import [--from <dir>]      copy valid events from the tracked mirror (or <dir>) into the local store
        baton ledger export                     copy valid local events into the tracked mirror (.baton/ledger/)
+       baton ledger reconcile [--json]         restore or reconcile incomplete operations and verify markers
 
 Import, export and verify the event ledger
 

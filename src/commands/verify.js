@@ -21,6 +21,7 @@ export const description = [
 export const options = {
   'allow-shell': { type: 'boolean', description: 'explicitly run a packet-defined shell test command' },
   'no-tests': { type: 'boolean', description: 'skip the test command (the result is never submittable)' },
+  'op-id': { type: 'string', description: 'idempotent operation id' },
   json: { type: 'boolean', description: 'print one JSON document' },
 };
 
@@ -122,7 +123,7 @@ export function classify(files, packet, plan, config, mode) {
  * Run the full verification for a packet and record the marker and event.
  * @returns {Promise<object>} the result written to the marker
  */
-export async function verifyPacket(ctx, pid, { runTests = true, allowShell = false } = {}) {
+export async function verifyPacket(ctx, pid, { runTests = true, allowShell = false, opId = null } = {}) {
   const root = ctx.root;
   const { config, plan, state } = load(root);
   const packet = plan.packets.find((p) => p.id === pid);
@@ -181,7 +182,7 @@ export async function verifyPacket(ctx, pid, { runTests = true, allowShell = fal
     in_scope: scope.in_scope, coordination: scope.coordination, foreign_owned_unattributed: scope.foreign,
     out_of_scope: scope.out_of_scope, protected: scope.protected, secrets, problems, tests,
   };
-  recordVerify(root, pid, result);
+  recordVerify(root, pid, result, { opId });
   return result;
 }
 
@@ -204,7 +205,7 @@ export function render(r) {
 export async function run(ctx, args) {
   const pid = args._[0];
   if (!pid) throw new UsageError(`missing packet id. Usage: ${usage}`);
-  const r = await verifyPacket(ctx, pid, { runTests: !args['no-tests'], allowShell: Boolean(args['allow-shell']) });
+  const r = await verifyPacket(ctx, pid, { runTests: !args['no-tests'], allowShell: Boolean(args['allow-shell']), opId: args['op-id'] });
   if (args.json) ctx.json(r);
   else ctx.out(render(r));
   // A scope-only check is informational: it is not "ok" (never submittable) but it did not find a violation.

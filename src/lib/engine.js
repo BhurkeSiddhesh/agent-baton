@@ -290,17 +290,42 @@ function clearVerifyMarker(root, pid) {
 }
 
 /**
+ * Filter ledger events for an operation ID.
+ * @param {object[]} events
+ * @param {string|null} opId
+ * @returns {object[]}
+ */
+export function findOperationEvents(events, opId) {
+  if (!opId) return [];
+  const target = String(opId).trim();
+  return events.filter((ev) => ev.op_id === target);
+}
+
+/**
  * Persist a verify result and append a `verify` event. `result` must carry {ok, mode, commit, fingerprint, tests:{tail}}.
  * Modes starting with "git-branch" are bound to a clean tree at HEAD == commit; other modes (git-shared, snapshot) to the fingerprint (`fingerprint_kind: "owned"` = only the packet's own files; otherwise the whole tree).
  */
-export function recordVerify(root, pid, result) {
+export function recordVerify(root, pid, result, opts = {}) {
   return withLock(stateDir(root), () => {
     const { plan, state } = load(root);
     getPacket(plan, pid);
     const leaseToken = state.packets[pid]?.leaseToken || 0;
-    const marker = { ...result, lease_token: leaseToken };
+    const opId = opts.opId || opts.op_id || null;
+    if (opId) {
+      const existing = findOperationEvents(readEvents(root), opId);
+      const verEv = existing.find((e) => e.packet === pid && e.kind === 'verify');
+      if (verEv) {
+        const marker = { ...result, lease_token: verEv.data.lease_token ?? leaseToken, op_id: opId };
+        writeJsonAtomic(verifyMarkerPath(root, pid), marker);
+        return verEv;
+      }
+    }
+    const marker = { ...result, lease_token: leaseToken, ...(opId ? { op_id: opId } : {}) };
     writeJsonAtomic(verifyMarkerPath(root, pid), marker);
-    return appendEvent(root, { packet: pid, kind: 'verify', by: 'harness', data: { ok: !!result.ok, commit: result.commit ?? null, mode: result.mode ?? null, lease_token: leaseToken } });
+    return appendEvent(root, {
+      packet: pid, kind: 'verify', by: 'harness', ...(opId ? { op_id: opId } : {}),
+      data: { ok: !!result.ok, commit: result.commit ?? null, mode: result.mode ?? null, lease_token: leaseToken },
+    });
   });
 }
 
@@ -311,14 +336,19 @@ export function recordVerify(root, pid, result) {
  * @param {string} root
  * @param {{from: string, to?: string, type: string, text: string, packet?: string|null}} m
  */
-export function postMessage(root, { from, to = 'all', type, text, packet = null }) {
+export function postMessage(root, { from, to = 'all', type, text, packet = null, opId = null }) {
   if (!MESSAGE_TYPES.includes(type)) throw new BatonError(`message type must be one of ${MESSAGE_TYPES.join('|')}`, { code: 'BAD_MESSAGE' });
   if (!String(text || '').trim()) throw new BatonError('a message needs text', { code: 'BAD_MESSAGE' });
   const config = loadConfig(root);
   requireActor(config, from, 'sender');
   if (to !== 'all') requireActor(config, to, 'recipient');
   checkIdentity(from);
-  return appendEvent(root, { packet, kind: 'message', by: from, data: { type, to, text: String(text) } });
+  if (opId) {
+    const existing = findOperationEvents(readEvents(root), opId);
+    const found = existing.find((e) => e.kind === 'message' && e.data?.type === type && (packet == null || e.packet === packet));
+    if (found) return found;
+  }
+  return appendEvent(root, { packet, kind: 'message', by: from, ...(opId ? { op_id: opId } : {}), data: { type, to, text: String(text) } });
 }
 
 // ------------------------------------------------------------------ transition
@@ -330,7 +360,7 @@ export function postMessage(root, { from, to = 'all', type, text, packet = null 
  * @param {string} to target status
  * @param {{by?: string|null, note?: string, kind?: string, data?: object}} [opts] kind "begin" is required for IN_PROGRESS
  */
-export function transition(root, pid, to, { by = null, note = '', kind = 'status', data = {} } = {}) {
+export function transition(root, pid, to, { by = null, note = '', kind = 'status', data = {}, opId = null } = {}) {
   return withLock(stateDir(root), () => {
     const { config, plan, state } = load(root);
     const p = getPacket(plan, pid);
@@ -376,6 +406,14 @@ export function transition(root, pid, to, { by = null, note = '', kind = 'status
       if (marker.lease_token != null && s.leaseToken && marker.lease_token !== s.leaseToken) {
         throw new BatonError(`${pid}: verified under lease token ${marker.lease_token} but current lease token is ${s.leaseToken}; verify again`, { code: 'STALE_LEASE_TOKEN' });
       }
+      const verifyEvents = readEvents(root).filter((e) => e.packet === pid && e.kind === 'verify');
+      const latestVerify = verifyEvents[verifyEvents.length - 1];
+      if (!latestVerify || !latestVerify.data?.ok) {
+        throw new BatonError(`${pid}: no passing verify event found in ledger (uncommitted verify); run "baton verify ${pid}"`, { code: 'NOT_VERIFIED' });
+      }
+      if (latestVerify.data?.lease_token != null && s.leaseToken && latestVerify.data.lease_token !== s.leaseToken) {
+        throw new BatonError(`${pid}: latest verify event is under lease token ${latestVerify.data.lease_token} but current lease token is ${s.leaseToken}; verify again`, { code: 'STALE_LEASE_TOKEN' });
+      }
       if (String(marker.mode || '').startsWith('git-branch')) {
         if (isDirty(root, { exclude: BUILTIN_COORDINATION })) throw new BatonError(`${pid}: commit your work first so the reviewer sees an exact artifact`, { code: 'DIRTY_TREE' });
         if (marker.commit !== headCommit(root)) throw new BatonError(`${pid}: HEAD moved since verify; run verify again`, { code: 'STALE_VERIFY' });
@@ -386,7 +424,7 @@ export function transition(root, pid, to, { by = null, note = '', kind = 'status
       evData = { ...evData, commit: marker.commit ?? null, tests: marker.tests?.tail ?? '' };
     }
     if (old === 'READY_FOR_REVIEW' && to === 'IN_PROGRESS') clearVerifyMarker(root, pid);
-    return appendEvent(root, { packet: pid, kind: evKind, to, by, note, data: evData });
+    return appendEvent(root, { packet: pid, kind: evKind, to, by, note, data: evData, ...(opId ? { op_id: opId } : {}) });
   });
 }
 
@@ -405,12 +443,37 @@ function requireWorker(config, agent) {
  * Start (or restart) work: lease + snapshot + claim message. IN_PROGRESS is reachable only through here.
  * @returns {{event: object, pulledEarly: boolean, rework: boolean, owns: string[], leaseUntil: string, base: string|null}}
  */
-export function begin(root, pid, agent, { pull = false, expectedRev = null } = {}) {
+export function begin(root, pid, agent, { pull = false, expectedRev = null, opId = null } = {}) {
   return withLock(stateDir(root), () => {
     const { config, plan, state } = load(root);
     const p = getPacket(plan, pid);
     checkIdentity(agent);
     requireWorker(config, agent);
+    if (opId) {
+      const existing = findOperationEvents(readEvents(root), opId);
+      const begEv = existing.find((e) => e.packet === pid && e.kind === 'begin' && e.by === agent);
+      if (begEv) {
+        clearVerifyMarker(root, pid);
+        saveSnapshot(root, pid, agent);
+        const hasMsg = existing.some((e) => e.kind === 'message' && e.data?.type === 'CLAIM');
+        if (!hasMsg) {
+          appendEvent(root, {
+            packet: pid, kind: 'message', by: agent, op_id: opId,
+            data: { type: 'CLAIM', to: 'all', text: `${pid} ${p.title}. Owns: ${p.owns.join(', ')}. Lease until ${begEv.data.lease_until}` },
+          });
+        }
+        return {
+          event: begEv,
+          pulledEarly: begEv.note === 'pulled early',
+          rework: begEv.note === 'rework',
+          owns: p.owns,
+          leaseUntil: begEv.data.lease_until,
+          leaseToken: begEv.data.lease_token || 1,
+          base: begEv.data.base,
+          idempotent: true,
+        };
+      }
+    }
     const s = state.packets[pid];
     const stream = `packet:${pid}`;
     const streamEvents = readEvents(root).filter((item) => (item.packet ? `packet:${item.packet}` : '') === stream);
@@ -437,13 +500,13 @@ export function begin(root, pid, agent, { pull = false, expectedRev = null } = {
     for (const d of p.deps) if (state.packets[d]) depCommits[d] = state.packets[d].commit || 'unbuilt';
     const base = rework && s.base ? s.base : headCommit(root);
     const event = transition(root, pid, 'IN_PROGRESS', {
-      by: agent, kind: 'begin', note: pulled ? 'pulled early' : rework ? 'rework' : '',
+      by: agent, kind: 'begin', opId, note: pulled ? 'pulled early' : rework ? 'rework' : '',
       data: { base, lease_until: lease, lease_token: nextToken, dep_commits: depCommits, ...(expectedRev != null ? { expected_rev: expectedRev } : {}) },
     });
     clearVerifyMarker(root, pid);
     saveSnapshot(root, pid, agent);
     appendEvent(root, {
-      packet: pid, kind: 'message', by: agent,
+      packet: pid, kind: 'message', by: agent, op_id: opId,
       data: { type: 'CLAIM', to: 'all', text: `${pid} ${p.title}. Owns: ${p.owns.join(', ')}. Lease until ${lease}${pulled ? ' (pulled early)' : ''}${rework ? ' (rework)' : ''}` },
     });
     return { event, pulledEarly: pulled, rework, owns: p.owns, leaseUntil: lease, leaseToken: nextToken, base };
@@ -473,12 +536,26 @@ export function heartbeat(root, pid, agent) {
 }
 
 /** Take over an IN_PROGRESS packet whose lease expired. */
-export function reclaim(root, pid, agent) {
+export function reclaim(root, pid, agent, { opId = null } = {}) {
   return withLock(stateDir(root), () => {
     const { config, plan, state } = load(root);
     getPacket(plan, pid);
     checkIdentity(agent);
     requireWorker(config, agent);
+    if (opId) {
+      const existing = findOperationEvents(readEvents(root), opId);
+      const begEv = existing.find((e) => e.packet === pid && e.kind === 'begin' && e.by === agent);
+      if (begEv) {
+        const hasMsg = existing.some((e) => e.kind === 'message' && e.data?.type === 'NOTICE');
+        if (!hasMsg) {
+          appendEvent(root, {
+            packet: pid, kind: 'message', by: agent, op_id: opId,
+            data: { type: 'NOTICE', to: 'all', text: `${pid} reclaimed (lease token ${begEv.data?.lease_token || 1})` },
+          });
+        }
+        return { event: begEv, leaseUntil: begEv.data.lease_until, leaseToken: begEv.data.lease_token || 1, idempotent: true };
+      }
+    }
     const s = state.packets[pid];
     const f = flags(pid, plan, state, { config });
     if (!f.includes('STALE') && !f.includes('NO_LEASE')) throw new BatonError(`${pid} is not stale (lease until ${s.leaseUntil})`, { code: 'NOT_STALE', hint: `wait for the lease to expire, or ask ${s.by} to hand it off` });
@@ -487,32 +564,52 @@ export function reclaim(root, pid, agent) {
     const oldToken = s.leaseToken || 1;
     const nextToken = oldToken + 1;
     const event = appendEvent(root, {
-      packet: pid, kind: 'begin', to: 'IN_PROGRESS', by: agent, note: `reclaimed from ${s.by}`,
+      packet: pid, kind: 'begin', to: 'IN_PROGRESS', by: agent, op_id: opId, note: `reclaimed from ${s.by}`,
       data: { base: s.base, lease_until: lease, lease_token: nextToken, dep_commits: s.depCommits },
     });
-    appendEvent(root, { packet: pid, kind: 'message', by: agent, data: { type: 'NOTICE', to: 'all', text: `${pid} reclaimed from ${s.by} (revoking lease token ${oldToken}; new token ${nextToken})` } });
+    appendEvent(root, {
+      packet: pid, kind: 'message', by: agent, op_id: opId,
+      data: { type: 'NOTICE', to: 'all', text: `${pid} reclaimed from ${s.by} (revoking lease token ${oldToken}; new token ${nextToken})` },
+    });
     return { event, leaseUntil: lease, leaseToken: nextToken };
   });
 }
 
 /** IN_PROGRESS/PLANNED/CARRIED_OVER -> BLOCKED with a reason; posts a BLOCKER message (with `question` when given). */
-export function block(root, pid, { by, reason, question = '' }) {
+export function block(root, pid, { by, reason, question = '', opId = null }) {
   if (!String(reason || '').trim()) throw new BatonError('a block needs a --reason', { code: 'NEEDS_REASON' });
   return withLock(stateDir(root), () => {
     const { config, state } = load(root);
     requireActor(config, by, 'agent');
+    if (opId) {
+      const existing = findOperationEvents(readEvents(root), opId);
+      const blkEv = existing.find((e) => e.packet === pid && e.kind === 'status' && e.to === 'BLOCKED');
+      if (blkEv) {
+        const hasMsg = existing.some((e) => e.kind === 'message' && e.data?.type === 'BLOCKER');
+        if (!hasMsg) {
+          appendEvent(root, {
+            packet: pid, kind: 'message', by, op_id: opId,
+            data: { type: 'BLOCKER', to: 'all', text: `${pid} blocked: ${reason}${question ? ` Question: ${question}` : ''}` },
+          });
+        }
+        return blkEv;
+      }
+    }
     const s = state.packets[pid];
     if (s && s.status === 'IN_PROGRESS' && s.by && s.by !== by && by !== config.orchestrator && by !== 'human') {
       throw new BatonError(`${pid} is held by ${s.by}`, { code: 'HELD' });
     }
-    const event = transition(root, pid, 'BLOCKED', { by, note: reason, data: { reason, question } });
-    appendEvent(root, { packet: pid, kind: 'message', by, data: { type: 'BLOCKER', to: 'all', text: `${pid} blocked: ${reason}${question ? ` Question: ${question}` : ''}` } });
+    const event = transition(root, pid, 'BLOCKED', { by, note: reason, opId, data: { reason, question } });
+    appendEvent(root, {
+      packet: pid, kind: 'message', by, op_id: opId,
+      data: { type: 'BLOCKER', to: 'all', text: `${pid} blocked: ${reason}${question ? ` Question: ${question}` : ''}` },
+    });
     return event;
   });
 }
 
 /** IN_PROGRESS -> READY_FOR_REVIEW (needs a current passing verify marker). Posts a SIGNOFF message. */
-export function submit(root, pid, { by, note = '' }) {
+export function submit(root, pid, { by, note = '', opId = null }) {
   return withLock(stateDir(root), () => {
     const { config, state } = load(root);
     requireActor(config, by, 'agent');
@@ -521,9 +618,27 @@ export function submit(root, pid, { by, note = '' }) {
       const lost = s.claimConflicts?.some((c) => c.claimant === by);
       throw new BatonError(lost ? `${pid} claim was won by ${s.by}; ${by} cannot submit it` : `${pid} is held by ${s.by}; ${by} cannot submit it`, { code: 'HELD' });
     }
-    const event = transition(root, pid, 'READY_FOR_REVIEW', { by, note });
+    if (opId) {
+      const existing = findOperationEvents(readEvents(root), opId);
+      const readyEv = existing.find((e) => e.packet === pid && e.kind === 'ready' && e.to === 'READY_FOR_REVIEW');
+      if (readyEv) {
+        const hasMsg = existing.some((e) => e.kind === 'message' && e.data?.type === 'SIGNOFF');
+        if (!hasMsg) {
+          const tail = String(readyEv.data?.tests || '').split(/\r?\n/).filter(Boolean).pop() || 'n/a';
+          appendEvent(root, {
+            packet: pid, kind: 'message', by, op_id: opId,
+            data: { type: 'SIGNOFF', to: state.packets[pid]?.reviewer || 'all', text: `${pid} READY_FOR_REVIEW commit=${readyEv.data?.commit || 'n/a'} tests: ${tail}` },
+          });
+        }
+        return readyEv;
+      }
+    }
+    const event = transition(root, pid, 'READY_FOR_REVIEW', { by, note, opId });
     const tail = String(event.data.tests || '').split(/\r?\n/).filter(Boolean).pop() || 'n/a';
-    appendEvent(root, { packet: pid, kind: 'message', by, data: { type: 'SIGNOFF', to: state.packets[pid].reviewer || 'all', text: `${pid} READY_FOR_REVIEW commit=${event.data.commit || 'n/a'} tests: ${tail}` } });
+    appendEvent(root, {
+      packet: pid, kind: 'message', by, op_id: opId,
+      data: { type: 'SIGNOFF', to: state.packets[pid].reviewer || 'all', text: `${pid} READY_FOR_REVIEW commit=${event.data.commit || 'n/a'} tests: ${tail}` },
+    });
     return event;
   });
 }
@@ -556,14 +671,34 @@ export function confirmClaim(root, pid, agent) {
  * Record a review verdict: outcome ACCEPTED | ACCEPTED_WITH_FIXES | REJECTED. Also accepts ACCEPTED_WITH_FIXES -> ACCEPTED.
  * `score` is optional, 0..10.
  */
-export function verdict(root, pid, outcome, { by, note = '', score = null }) {
+export function verdict(root, pid, outcome, { by, note = '', score = null, opId = null }) {
   if (!REVIEW_OUTCOMES.has(outcome)) throw new BatonError(`outcome must be one of ${[...REVIEW_OUTCOMES].join('|')}`, { code: 'BAD_STATUS' });
   if (score != null && !(Number.isFinite(score) && score >= 0 && score <= 10)) throw new BatonError('score must be a number from 0 to 10', { code: 'BAD_SCORE' });
   return withLock(stateDir(root), () => {
     const { plan } = load(root);
     const p = getPacket(plan, pid);
-    const event = transition(root, pid, outcome, { by, note, data: score == null ? {} : { score } });
-    appendEvent(root, { packet: pid, kind: 'message', by, data: { type: 'VERDICT', to: p.agent || 'all', text: `${pid} ${outcome}.${note ? ` ${note}` : ''}` } });
+    if (opId) {
+      const existing = findOperationEvents(readEvents(root), opId);
+      const verdEv = existing.find((e) => e.packet === pid && e.kind === 'verdict');
+      if (verdEv) {
+        if (verdEv.to !== outcome) {
+          throw new BatonError(`operation ${opId} was already executed with outcome ${verdEv.to}; cannot change to ${outcome}`, { code: 'OP_CONFLICT' });
+        }
+        const hasMsg = existing.some((e) => e.kind === 'message' && e.data?.type === 'VERDICT');
+        if (!hasMsg) {
+          appendEvent(root, {
+            packet: pid, kind: 'message', by, op_id: opId,
+            data: { type: 'VERDICT', to: p.agent || 'all', text: `${pid} ${outcome}.${note ? ` ${note}` : ''}` },
+          });
+        }
+        return verdEv;
+      }
+    }
+    const event = transition(root, pid, outcome, { by, note, opId, data: score == null ? {} : { score } });
+    appendEvent(root, {
+      packet: pid, kind: 'message', by, op_id: opId,
+      data: { type: 'VERDICT', to: p.agent || 'all', text: `${pid} ${outcome}.${note ? ` ${note}` : ''}` },
+    });
     return event;
   });
 }
@@ -577,7 +712,7 @@ export function carry(root, pid, { by, note = '' }) {
 }
 
 /** Change the reviewer of an undecided packet (orchestrator or human only; the new reviewer must not have worked on it). */
-export function reassignReviewer(root, pid, reviewer, { by }) {
+export function reassignReviewer(root, pid, reviewer, { by, opId = null }) {
   return withLock(stateDir(root), () => {
     const { config, plan, state } = load(root);
     getPacket(plan, pid);
@@ -585,11 +720,28 @@ export function reassignReviewer(root, pid, reviewer, { by }) {
     requireOrchestrator(config, by);
     const s = state.packets[pid];
     if (s.status === 'ACCEPTED') throw new BatonError(`${pid} is already decided`, { code: 'ALREADY_DONE' });
+    if (opId) {
+      const existing = findOperationEvents(readEvents(root), opId);
+      const revEv = existing.find((e) => e.packet === pid && e.kind === 'reviewer');
+      if (revEv) {
+        const hasMsg = existing.some((e) => e.kind === 'message' && e.data?.text?.includes('reviewer reassigned'));
+        if (!hasMsg) {
+          appendEvent(root, {
+            packet: pid, kind: 'message', by, op_id: opId,
+            data: { type: 'NOTICE', to: 'all', text: `${pid} reviewer reassigned to ${reviewer}` },
+          });
+        }
+        return revEv;
+      }
+    }
     requireActor(config, reviewer, 'reviewer');
     if (!hasRole(config, reviewer, 'reviewer')) throw new BatonError(`${reviewer} has no reviewer role`, { code: 'NOT_REVIEWER' });
     if (reviewer === s.agent || s.contributors.includes(reviewer)) throw new BatonError(`${reviewer} worked on ${pid} and cannot review it`, { code: 'REVIEWER_CONFLICT' });
-    const event = appendEvent(root, { packet: pid, kind: 'reviewer', by, note: `reviewer -> ${reviewer}`, data: { reviewer } });
-    appendEvent(root, { packet: pid, kind: 'message', by, data: { type: 'NOTICE', to: 'all', text: `${pid} reviewer reassigned to ${reviewer}` } });
+    const event = appendEvent(root, { packet: pid, kind: 'reviewer', by, op_id: opId, note: `reviewer -> ${reviewer}`, data: { reviewer } });
+    appendEvent(root, {
+      packet: pid, kind: 'message', by, op_id: opId,
+      data: { type: 'NOTICE', to: 'all', text: `${pid} reviewer reassigned to ${reviewer}` },
+    });
     return event;
   });
 }
@@ -598,7 +750,7 @@ export function reassignReviewer(root, pid, reviewer, { by }) {
  * Hand a packet to another author. Allowed for PLANNED/CARRIED_OVER/REJECTED/BLOCKED/IN_PROGRESS packets, by the current
  * author/holder, the orchestrator or human. An IN_PROGRESS packet is released (-> BLOCKED); the new author must `begin` it.
  */
-export function handoff(root, pid, { to, by, note = '' }) {
+export function handoff(root, pid, { to, by, note = '', opId = null }) {
   return withLock(stateDir(root), () => {
     const { config, plan, state } = load(root);
     getPacket(plan, pid);
@@ -609,25 +761,59 @@ export function handoff(root, pid, { to, by, note = '' }) {
     if (REWORK.has(s.status) || s.status === 'ACCEPTED') throw new BatonError(`${pid} is ${s.status}; it cannot be handed off`, { code: 'BAD_TRANSITION' });
     if (![s.agent, s.by].includes(by) && by !== config.orchestrator && by !== 'human') throw new BatonError(`only the author, holder or orchestrator may hand off ${pid}`, { code: 'NOT_YOURS' });
     if (to === s.reviewer) throw new BatonError(`${to} is the reviewer of ${pid}; reassign the reviewer first`, { code: 'REVIEWER_CONFLICT' });
+    if (opId) {
+      const existing = findOperationEvents(readEvents(root), opId);
+      const hndEv = existing.find((e) => e.packet === pid && e.kind === 'handoff');
+      if (hndEv) {
+        const hasMsg = existing.some((e) => e.kind === 'message' && e.data?.type === 'HANDOFF');
+        if (!hasMsg) {
+          appendEvent(root, {
+            packet: pid, kind: 'message', by, op_id: opId,
+            data: { type: 'HANDOFF', to, text: `${pid} handed to ${to}.${note ? ` ${note}` : ''}` },
+          });
+        }
+        return hndEv;
+      }
+    }
     const event = appendEvent(root, {
-      packet: pid, kind: 'handoff', to: s.status === 'IN_PROGRESS' ? 'BLOCKED' : null, by, note,
+      packet: pid, kind: 'handoff', to: s.status === 'IN_PROGRESS' ? 'BLOCKED' : null, by, note, op_id: opId,
       data: { agent: to, from: s.agent, reason: 'handoff' },
     });
-    appendEvent(root, { packet: pid, kind: 'message', by, data: { type: 'HANDOFF', to, text: `${pid} handed to ${to}.${note ? ` ${note}` : ''}` } });
+    appendEvent(root, {
+      packet: pid, kind: 'message', by, op_id: opId,
+      data: { type: 'HANDOFF', to, text: `${pid} handed to ${to}.${note ? ` ${note}` : ''}` },
+    });
     return event;
   });
 }
 
 /** Open or close a human gate. Allowed for the gate owner or "human". */
-export function setGate(root, gateId, open, { by, note = '' }) {
+export function setGate(root, gateId, open, { by, note = '', opId = null }) {
   return withLock(stateDir(root), () => {
     const { config, plan } = load(root);
     const g = plan.gates.find((x) => x.id === gateId);
     if (!g) throw new BatonError(`unknown gate ${gateId}`, { code: 'UNKNOWN_GATE', hint: 'run "baton gate list" to see the gates' });
     requireActor(config, by, 'actor');
     if (by !== 'human' && by !== g.owner) throw new BatonError(`gate ${gateId} belongs to ${g.owner}; ${by} cannot ${open ? 'open' : 'close'} it`, { code: 'NOT_GATE_OWNER' });
-    const event = appendEvent(root, { packet: null, kind: 'gate', by, note, data: { gate: gateId, open: !!open } });
-    appendEvent(root, { kind: 'message', by, data: { type: 'NOTICE', to: 'all', text: `gate ${gateId} ${open ? 'opened' : 'closed'} by ${by}` } });
+    if (opId) {
+      const existing = findOperationEvents(readEvents(root), opId);
+      const gateEv = existing.find((e) => e.kind === 'gate' && e.data?.gate === gateId);
+      if (gateEv) {
+        const hasMsg = existing.some((e) => e.kind === 'message' && e.data?.text?.includes(`gate ${gateId}`));
+        if (!hasMsg) {
+          appendEvent(root, {
+            packet: null, kind: 'message', by, op_id: opId,
+            data: { type: 'NOTICE', to: 'all', text: `gate ${gateId} ${open ? 'opened' : 'closed'} by ${by}` },
+          });
+        }
+        return gateEv;
+      }
+    }
+    const event = appendEvent(root, { packet: null, kind: 'gate', by, note, op_id: opId, data: { gate: gateId, open: !!open } });
+    appendEvent(root, {
+      kind: 'message', by, op_id: opId,
+      data: { type: 'NOTICE', to: 'all', text: `gate ${gateId} ${open ? 'opened' : 'closed'} by ${by}` },
+    });
     return event;
   });
 }
@@ -846,6 +1032,109 @@ export function progress(plan, state, { now = utcnow() } = {}) {
   const closedGates = plan.gates.filter((g) => !state.gates[g.id]?.open)
     .map((g) => ({ id: g.id, title: g.title ?? '', owner: g.owner ?? 'human', neededBy: g.needed_by ?? null, daysUntilNeeded: daysUntil(g.needed_by, now) }));
   return { milestones, overall: { done, total: counted.length, percent: counted.length ? Math.round((done / counted.length) * 100) : 0 }, closedGates, now: stamp(now) };
+}
+
+/**
+ * Detect and reconcile interrupted or incomplete multi-event transitions and verify markers.
+ * @param {string} root
+ * @returns {{reconciled: string[], clearedMarkers: string[], restoredMarkers: string[]}}
+ */
+export function reconcileOperations(root) {
+  return withLock(stateDir(root), () => {
+    const { plan, state } = load(root);
+    const events = readEvents(root);
+    const reconciled = [];
+    const clearedMarkers = [];
+    const restoredMarkers = [];
+
+    // Group events by op_id
+    const byOp = new Map();
+    for (const ev of events) {
+      if (ev.op_id) {
+        if (!byOp.has(ev.op_id)) byOp.set(ev.op_id, []);
+        byOp.get(ev.op_id).push(ev);
+      }
+    }
+
+    for (const [opId, opEvents] of byOp) {
+      // 1. ready -> SIGNOFF message
+      const readyEv = opEvents.find((e) => e.kind === 'ready' && e.to === 'READY_FOR_REVIEW');
+      if (readyEv && !opEvents.some((e) => e.kind === 'message' && e.data?.type === 'SIGNOFF')) {
+        const pid = readyEv.packet;
+        const tail = String(readyEv.data?.tests || '').split(/\r?\n/).filter(Boolean).pop() || 'n/a';
+        appendEvent(root, {
+          packet: pid, kind: 'message', by: readyEv.by, op_id: opId,
+          data: { type: 'SIGNOFF', to: state.packets[pid]?.reviewer || 'all', text: `${pid} READY_FOR_REVIEW commit=${readyEv.data?.commit || 'n/a'} tests: ${tail}` },
+        });
+        reconciled.push(`reconciled SIGNOFF message for op ${opId} (${pid})`);
+      }
+
+      // 2. verdict -> VERDICT message
+      const verdEv = opEvents.find((e) => e.kind === 'verdict');
+      if (verdEv && !opEvents.some((e) => e.kind === 'message' && e.data?.type === 'VERDICT')) {
+        const pid = verdEv.packet;
+        const p = plan.packets.find((item) => item.id === pid);
+        appendEvent(root, {
+          packet: pid, kind: 'message', by: verdEv.by, op_id: opId,
+          data: { type: 'VERDICT', to: p?.agent || 'all', text: `${pid} ${verdEv.to}.${verdEv.note ? ` ${verdEv.note}` : ''}` },
+        });
+        reconciled.push(`reconciled VERDICT message for op ${opId} (${pid})`);
+      }
+
+      // 3. begin -> CLAIM message
+      const begEv = opEvents.find((e) => e.kind === 'begin' && e.to === 'IN_PROGRESS');
+      if (begEv && !opEvents.some((e) => e.kind === 'message' && (e.data?.type === 'CLAIM' || e.data?.type === 'NOTICE'))) {
+        const pid = begEv.packet;
+        const p = plan.packets.find((item) => item.id === pid);
+        if (p) {
+          appendEvent(root, {
+            packet: pid, kind: 'message', by: begEv.by, op_id: opId,
+            data: { type: 'CLAIM', to: 'all', text: `${pid} ${p.title}. Owns: ${p.owns.join(', ')}. Lease until ${begEv.data?.lease_until || 'n/a'}` },
+          });
+          reconciled.push(`reconciled CLAIM message for op ${opId} (${pid})`);
+        }
+      }
+
+      // 4. status (BLOCKED) -> BLOCKER message
+      const blkEv = opEvents.find((e) => e.kind === 'status' && e.to === 'BLOCKED');
+      if (blkEv && !opEvents.some((e) => e.kind === 'message' && e.data?.type === 'BLOCKER')) {
+        const pid = blkEv.packet;
+        appendEvent(root, {
+          packet: pid, kind: 'message', by: blkEv.by, op_id: opId,
+          data: { type: 'BLOCKER', to: 'all', text: `${pid} blocked: ${blkEv.note}` },
+        });
+        reconciled.push(`reconciled BLOCKER message for op ${opId} (${pid})`);
+      }
+    }
+
+    // 5. Reconcile verify markers vs ledger events
+    for (const p of plan.packets) {
+      const markerPath = verifyMarkerPath(root, p.id);
+      const hasMarker = fs.existsSync(markerPath);
+      const verifyEvents = events.filter((e) => e.packet === p.id && e.kind === 'verify');
+      const latestVerify = verifyEvents[verifyEvents.length - 1];
+
+      if (hasMarker && (!latestVerify || !latestVerify.data?.ok)) {
+        try { fs.unlinkSync(markerPath); } catch {}
+        clearedMarkers.push(p.id);
+      } else if (!hasMarker && latestVerify && latestVerify.data?.ok && state.packets[p.id]?.leaseToken === latestVerify.data?.lease_token) {
+        writeJsonAtomic(markerPath, {
+          packet: p.id,
+          ok: true,
+          mode: latestVerify.data.mode,
+          commit: latestVerify.data.commit,
+          lease_token: latestVerify.data.lease_token,
+          fingerprint: null,
+          fingerprint_kind: 'owned',
+          problems: [],
+          tests: { ran: true, ok: true, tail: '' },
+        });
+        restoredMarkers.push(p.id);
+      }
+    }
+
+    return { reconciled, clearedMarkers, restoredMarkers };
+  });
 }
 
 export { patternsOverlap, getAgent };

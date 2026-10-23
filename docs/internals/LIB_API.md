@@ -199,23 +199,25 @@ Constants (Sets unless noted): `STATUSES[]`, `TRANSITIONS{status: Set}`, `DONE` 
 ### Mutations (all take the state lock, validate, append events, and throw BatonError with the codes shown)
 | Function | Effect and refusal codes |
 |---|---|
-| `transition(root, pid, to, {by, note, kind, data})` | the full rule set; returns the event. `BAD_TRANSITION`, `BEGIN_ONLY`, `DEPS_UNMET`, `GATE_CLOSED`, `OWNERSHIP_CLASH`, `NO_REVIEWER`, `NOT_REVIEWER`, `REVIEWER_CONFLICT`, `OPEN_FINDINGS`, `REJECT_NEEDS_REASON`, `NOT_VERIFIED`, `DIRTY_TREE`, `STALE_VERIFY`, `STALE_LEASE_TOKEN`, `IDENTITY` |
-| `begin(root, pid, agent, {pull, expectedRev}) -> {event, pulledEarly, rework, owns, leaseUntil, leaseToken, base}` | lease + snapshot + CLAIM message. Also `NOT_YOURS`, `ALREADY_STARTED`, `ALREADY_DONE`, `NOT_CONTRIBUTOR`, `NOT_WORKER`, `UNKNOWN_AGENT`, `STALE_REVISION` |
+| `transition(root, pid, to, {by, note, kind, data, opId})` | the full rule set; returns the event. `BAD_TRANSITION`, `BEGIN_ONLY`, `DEPS_UNMET`, `GATE_CLOSED`, `OWNERSHIP_CLASH`, `NO_REVIEWER`, `NOT_REVIEWER`, `REVIEWER_CONFLICT`, `OPEN_FINDINGS`, `REJECT_NEEDS_REASON`, `NOT_VERIFIED`, `DIRTY_TREE`, `STALE_VERIFY`, `STALE_LEASE_TOKEN`, `IDENTITY` |
+| `begin(root, pid, agent, {pull, expectedRev, opId}) -> {event, pulledEarly, rework, owns, leaseUntil, leaseToken, base, idempotent?}` | lease + snapshot + CLAIM message. Idempotent under matching `opId`. Also `NOT_YOURS`, `ALREADY_STARTED`, `ALREADY_DONE`, `NOT_CONTRIBUTOR`, `NOT_WORKER`, `UNKNOWN_AGENT`, `STALE_REVISION` |
 | `heartbeat(root, pid, agent) -> leaseUntil` | `NOT_IN_PROGRESS`, `HELD` |
-| `reclaim(root, pid, agent) -> {event, leaseUntil, leaseToken}` | needs `STALE` or `NO_LEASE`; `NOT_STALE` |
-| `block(root, pid, {by, reason, question})` | BLOCKED + BLOCKER message; `NEEDS_REASON`, `HELD` |
-| `submit(root, pid, {by, note})` | READY_FOR_REVIEW (event kind `ready`) + SIGNOFF message; throws `HELD` if the packet is held by another agent or if a conflicting claim was won by another claimant |
-| `verdict(root, pid, outcome, {by, note, score})` | `ACCEPTED \| ACCEPTED_WITH_FIXES \| REJECTED` + VERDICT message; `BAD_SCORE` |
+| `reclaim(root, pid, agent, {opId}) -> {event, leaseUntil, leaseToken, idempotent?}` | needs `STALE` or `NO_LEASE`; idempotent under matching `opId`; `NOT_STALE` |
+| `block(root, pid, {by, reason, question, opId})` | BLOCKED + BLOCKER message; idempotent under matching `opId`; `NEEDS_REASON`, `HELD` |
+| `submit(root, pid, {by, note, opId})` | READY_FOR_REVIEW (event kind `ready`) + SIGNOFF message; idempotent under matching `opId`; throws `HELD` if the packet is held by another agent or if a conflicting claim was won by another claimant; throws `NOT_VERIFIED` if no passing verify event is committed in the ledger |
+| `verdict(root, pid, outcome, {by, note, score, opId})` | `ACCEPTED \| ACCEPTED_WITH_FIXES \| REJECTED` + VERDICT message; idempotent under matching `opId` (`OP_CONFLICT` if retried with conflicting outcome); `BAD_SCORE` |
 | `carry(root, pid, {by, note})` | REJECTED to CARRIED_OVER, orchestrator/human only (`NOT_ORCHESTRATOR`) |
-| `reassignReviewer(root, pid, reviewer, {by})` | orchestrator/human only; reviewer needs the reviewer role and must not have worked on it |
-| `handoff(root, pid, {to, by, note})` | new author needs the worker role; an IN_PROGRESS packet is released to BLOCKED and the new author must `begin`; `BAD_TRANSITION` for packets under review or accepted |
-| `setGate(root, gateId, open, {by, note})` | gate owner or `human` only (`NOT_GATE_OWNER`, `UNKNOWN_GATE`) |
-| `postMessage(root, {from, to, type, text, packet})` | `BAD_MESSAGE`, `UNKNOWN_AGENT` |
+| `reassignReviewer(root, pid, reviewer, {by, opId})` | orchestrator/human only; reviewer needs the reviewer role and must not have worked on it; idempotent under `opId` |
+| `handoff(root, pid, {to, by, note, opId})` | new author needs the worker role; an IN_PROGRESS packet is released to BLOCKED and the new author must `begin`; `BAD_TRANSITION` for packets under review or accepted; idempotent under `opId` |
+| `setGate(root, gateId, open, {by, note, opId})` | gate owner or `human` only (`NOT_GATE_OWNER`, `UNKNOWN_GATE`); idempotent under `opId` |
+| `postMessage(root, {from, to, type, text, packet, opId})` | `BAD_MESSAGE`, `UNKNOWN_AGENT`; deduplicated under `opId` |
 | `addFinding(root, {packet, by, severity, text, file, line, evidence, fix, against}) -> {fid, event}` | filer needs the auditor or reviewer role and must not have worked on the packet |
 | `resolveFinding(root, fid, {by, resolution, confirm, note})` | fixer records `fixed\|wontfix\|invalid`; only the filer can `confirm` (after a resolution) or close it as `invalid`; closed findings stop blocking acceptance |
 | `acknowledge(root, eventId, {by, reason})` | `ack` event for a known anomaly |
-| `recordVerify(root, pid, result)` | writes the verify marker `<state>/verified/<pid>.json` and a `verify` event (`by: 'harness'`) |
+| `recordVerify(root, pid, result, {opId})` | writes the verify marker `<state>/verified/<pid>.json` and a `verify` event (`by: 'harness'`); idempotent under `opId` |
 | `readVerifyMarker(root, pid) -> object\|null`, `verifyMarkerPath(root, pid)` | |
+| `findOperationEvents(events, opId) -> event[]` | filter ledger events matching an operation ID |
+| `reconcileOperations(root) -> {reconciled: string[], clearedMarkers: string[], restoredMarkers: string[]}` | detects and reconciles interrupted multi-event operations and aligns disk markers with committed ledger verify events |
 
 **Verify marker contract.** `result = {packet, ok, mode, commit, fingerprint, tests: {ran, ok, tail}, in_scope, coordination, out_of_scope, secrets, problems, ...}`. `submit` requires `ok`
 and a *current* marker: modes starting with `git-branch` require a clean tree (ignoring `.baton/ledger|state|views`) and `HEAD == commit`; any other mode (`git-shared`, `snapshot`)
