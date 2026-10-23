@@ -47,6 +47,10 @@ export function validateEventSchema(ev, { allowLegacy = true } = {}) {
   if (!(ev.by == null || string(ev.by))) problems.push('by must be a string or null');
   if (!string(ev.note)) problems.push('note must be a string');
   if (!isObject(ev.data)) problems.push('data must be an object');
+  if (!(ev.rev == null || (Number.isInteger(ev.rev) && ev.rev >= 1))) problems.push('rev must be a positive integer when present');
+  if (!(ev.parents == null || (Array.isArray(ev.parents) && new Set(ev.parents).size === ev.parents.length && ev.parents.every((id) => string(id) && EVENT_ID_RE.test(id))))) {
+    problems.push('parents must be unique event ids when present');
+  }
   if (!string(ev.sha) || !/^[0-9a-f]{64}$/.test(ev.sha)) problems.push('sha must be a lowercase SHA-256 hex digest');
   if (packetKinds.has(ev.kind) && !string(ev.packet)) problems.push(`${ev.kind}.packet is required`);
   if (transitionKinds.has(ev.kind) && !string(ev.to)) problems.push(`${ev.kind}.to is required`);

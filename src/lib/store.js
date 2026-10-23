@@ -73,6 +73,75 @@ export function eventSha(ev) {
 
 const cmp = (a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
+/** Revision stream used for causal ordering and sibling-conflict detection. */
+export function eventStream(ev) {
+  if (typeof ev.packet === 'string') return `packet:${ev.packet}`;
+  if (ev.kind === 'gate' && typeof ev.data?.gate === 'string') return `gate:${ev.data.gate}`;
+  return `global:${ev.kind}`;
+}
+
+/** Deterministic topological order. Parents always precede children despite clock skew. */
+export function orderEvents(events) {
+  const byId = new Map(events.map((ev) => [ev.id, ev]));
+  const children = new Map(events.map((ev) => [ev.id, []]));
+  const indegree = new Map(events.map((ev) => [ev.id, 0]));
+  for (const ev of events) {
+    for (const parent of ev.parents || []) {
+      if (!byId.has(parent)) continue;
+      children.get(parent).push(ev.id);
+      indegree.set(ev.id, indegree.get(ev.id) + 1);
+    }
+  }
+  const ready = events.filter((ev) => indegree.get(ev.id) === 0).sort(cmp);
+  const ordered = [];
+  while (ready.length) {
+    const ev = ready.shift();
+    ordered.push(ev);
+    for (const child of children.get(ev.id)) {
+      indegree.set(child, indegree.get(child) - 1);
+      if (indegree.get(child) === 0) { ready.push(byId.get(child)); ready.sort(cmp); }
+    }
+  }
+  if (ordered.length < events.length) {
+    const seen = new Set(ordered.map((ev) => ev.id));
+    ordered.push(...events.filter((ev) => !seen.has(ev.id)).sort(cmp));
+  }
+  return ordered;
+}
+
+/** Causal/reference problems that must be reconciled before the set is authoritative. */
+export function eventOrderingProblems(events) {
+  const problems = [];
+  const byId = new Map(events.map((ev) => [ev.id, ev]));
+  const ids = new Set(byId.keys());
+  const revisions = new Map();
+  for (const ev of events) {
+    for (const parent of ev.parents || []) if (!ids.has(parent)) problems.push({ id: ev.id, problem: `missing causal parent ${parent}` });
+    if (ev.rev == null) continue;
+    const key = `${eventStream(ev)}@${ev.rev}`;
+    const prior = revisions.get(key);
+    if (prior && prior !== ev.id) problems.push({ id: ev.id, problem: `concurrent revision conflict with ${prior} in ${eventStream(ev)} at rev ${ev.rev}` });
+    else revisions.set(key, ev.id);
+  }
+  const indegree = new Map(events.map((ev) => [ev.id, 0]));
+  const children = new Map(events.map((ev) => [ev.id, []]));
+  for (const ev of events) for (const parent of ev.parents || []) if (byId.has(parent)) {
+    indegree.set(ev.id, indegree.get(ev.id) + 1);
+    children.get(parent).push(ev.id);
+  }
+  const ready = [...indegree].filter(([, degree]) => degree === 0).map(([id]) => id);
+  let visited = 0;
+  while (ready.length) {
+    const id = ready.pop(); visited++;
+    for (const child of children.get(id)) {
+      indegree.set(child, indegree.get(child) - 1);
+      if (indegree.get(child) === 0) ready.push(child);
+    }
+  }
+  if (visited !== events.length) for (const [id, degree] of indegree) if (degree > 0) problems.push({ id, problem: 'causal parent cycle' });
+  return problems;
+}
+
 /**
  * All events: union of the local store and the tracked mirror, de-duplicated by id (local wins),
  * sorted by (ts, id). Unparsable files are skipped (verifyLedger reports them).
@@ -86,7 +155,7 @@ export function readEvents(root) {
       if (ev && ev.id === id && validateEventSchema(ev).length === 0 && eventSha(ev) === ev.sha) byId.set(id, ev);
     }
   }
-  return [...byId.values()].sort(cmp);
+  return orderEvents([...byId.values()]);
 }
 
 /**
@@ -99,8 +168,13 @@ export function readEvents(root) {
 export function appendEvent(root, partial) {
   if (!EVENT_KINDS.includes(partial.kind)) throw new BatonError(`unknown event kind "${partial.kind}"`, { code: 'BAD_EVENT' });
   return withLock(stateDir(root), () => {
-    // O(1) in the ledger size: the newest id comes from file names alone, and only the newest file of each
-    // store is parsed to check the format version.
+    const existing = readEvents(root);
+    const orderingProblems = eventOrderingProblems(existing);
+    if (orderingProblems.length) throw new BatonError(`ledger has unresolved causal conflicts: ${orderingProblems[0].problem}`, {
+      code: 'LEDGER_CONFLICT', hint: 'run "baton ledger verify" and reconcile the diverged event set before writing', details: orderingProblems,
+    });
+    // The newest id comes from file names alone, and only the newest file of each store is parsed to check
+    // the format version. Causal revision assignment above intentionally inspects accepted events.
     const dirs = [eventsDir(root), ledgerDir(root)];
     let last = '';
     for (const dir of dirs) {
@@ -140,6 +214,11 @@ export function appendEvent(root, partial) {
       data: partial.data ?? {},
       hv: LEDGER_VERSION,
     };
+    const stream = eventStream(ev);
+    const prior = existing.filter((item) => eventStream(item) === stream);
+    const parent = prior[prior.length - 1];
+    ev.rev = Math.max(prior.length, ...prior.map((item) => item.rev || 0)) + 1;
+    ev.parents = parent ? [parent.id] : [];
     ev.sha = eventSha(ev);
     const schemaProblems = validateEventSchema(ev, { allowLegacy: false });
     if (schemaProblems.length) throw new BatonError(`invalid ${ev.kind} event: ${schemaProblems.join('; ')}`, { code: 'BAD_EVENT_SCHEMA' });
@@ -180,6 +259,8 @@ export function verifyLedger(root) {
     if (slot.local && slot.mirror && slot.local.sha !== slot.mirror.sha) add(id, 'both', 'error', 'local and mirror copies differ');
     else if (slot.local && !slot.mirror && mirror) add(id, 'mirror', 'warn', 'missing from the tracked mirror (run "baton ledger export")');
   }
+  const accepted = [...valid.values()].map((slot) => slot.local || slot.mirror);
+  for (const issue of eventOrderingProblems(accepted)) add(issue.id, 'both', 'error', issue.problem);
   const acked = new Set();
   for (const slot of valid.values()) {
     const ev = slot.local || slot.mirror;
