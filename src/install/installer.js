@@ -113,6 +113,55 @@ function writeKeepingLinks(abs, data) {
   writeFileAtomic(abs, data);
 }
 
+function snapshotPath(abs) {
+  let st;
+  try { st = fs.lstatSync(abs); } catch (e) {
+    if (e.code === 'ENOENT') return { abs, existed: false };
+    throw e;
+  }
+  if (st.isSymbolicLink()) {
+    let targetIsDirectory = false;
+    try { targetIsDirectory = fs.statSync(abs).isDirectory(); } catch { /* dangling link */ }
+    return { abs, existed: true, kind: 'symlink', link: fs.readlinkSync(abs), targetIsDirectory };
+  }
+  if (st.isFile()) return { abs, existed: true, kind: 'file', data: fs.readFileSync(abs), mode: st.mode };
+  return { abs, existed: true, kind: 'other' };
+}
+
+function restoreSnapshot(s) {
+  let current = null;
+  try { current = fs.lstatSync(s.abs); } catch { /* missing */ }
+  if (!s.existed) {
+    if (current && !current.isDirectory()) fs.rmSync(s.abs, { force: true });
+    return;
+  }
+  if (s.kind === 'other') return;
+  ensureDir(path.dirname(s.abs));
+  if (s.kind === 'symlink') {
+    if (current) fs.rmSync(s.abs, { force: true, recursive: current.isDirectory() && !current.isSymbolicLink() });
+    fs.symlinkSync(s.link, s.abs, process.platform === 'win32' ? (s.targetIsDirectory ? 'junction' : 'file') : undefined);
+    return;
+  }
+  if (current && !current.isFile()) {
+    fs.rmSync(s.abs, { force: true, recursive: current.isDirectory() && !current.isSymbolicLink() });
+    current = null;
+  }
+  if (current?.isFile()) fs.writeFileSync(s.abs, s.data);
+  else writeFileAtomic(s.abs, s.data);
+  try { fs.chmodSync(s.abs, s.mode); } catch { /* not supported on this filesystem */ }
+}
+
+function rollbackFiles(snapshots, createdDirs) {
+  const failures = [];
+  for (const s of [...snapshots].reverse()) {
+    try { restoreSnapshot(s); } catch (e) { failures.push(`${toPosix(s.abs)}: ${e.code || e.message}`); }
+  }
+  for (const dir of [...createdDirs].sort((a, b) => b.length - a.length)) {
+    try { fs.rmdirSync(dir); } catch { /* non-empty, already gone, or retained by the host */ }
+  }
+  return failures;
+}
+
 function parseJsonText(text) {
   return JSON.parse(text.replace(/^﻿/, ''));
 }
@@ -476,7 +525,7 @@ function ask(rl, question, def) {
  * @param {{root: string, env?: object, stdin?: any}} ctx
  * @param {{mode?: 'init'|'upgrade'|'agents', agents?: string, name?: string, testCmd?: string, yes?: boolean, force?: boolean,
  *   dryRun?: boolean, noVendor?: boolean, cloud?: boolean, hooks?: boolean, noGitIgnore?: boolean, docs?: boolean, only?: string,
- *   config?: object, prune?: boolean}} [opts]
+ *   config?: object, prune?: boolean, _failAfter?: number}} [opts]
  */
 export async function runInstall(ctx, opts = {}) {
   const root = path.resolve(ctx.root);
@@ -617,12 +666,44 @@ export async function runInstall(ctx, opts = {}) {
     }
   }
   for (const w of writes) if (w.abs && !w.remove) assertInsideRoot(root, w.abs);
+  const manifestAbs = path.join(root, '.baton', 'manifest.json');
+  const targets = [...writes.map((w) => w.abs || (w.prune && path.join(root, w.prune.rel))).filter(Boolean), manifestAbs];
+  const snapshots = [];
+  const seenSnapshots = new Set();
+  for (const abs of targets) {
+    const key = path.resolve(abs);
+    if (seenSnapshots.has(key)) continue;
+    seenSnapshots.add(key);
+    const logical = snapshotPath(key);
+    snapshots.push(logical);
+    if (logical.kind === 'symlink') {
+      const target = fs.realpathSync.native(key);
+      if (!seenSnapshots.has(target)) { seenSnapshots.add(target); snapshots.push(snapshotPath(target)); }
+    }
+  }
+  const createdDirs = new Set();
+  for (const abs of targets) {
+    let dir = path.dirname(abs);
+    while (dir.startsWith(root + path.sep) && dir !== root && !fs.existsSync(dir)) {
+      createdDirs.add(dir);
+      dir = path.dirname(dir);
+    }
+  }
   let current = null;
+  let mutations = 0;
+  const injectedFailure = () => {
+    mutations++;
+    if (Number.isInteger(opts._failAfter) && opts._failAfter === mutations) {
+      const err = new Error(`injected installer failure after mutation ${mutations}`);
+      err.code = 'BATON_TEST_FAILURE';
+      throw err;
+    }
+  };
   try {
     for (const w of writes) {
       current = w.abs || null;
-      if (w.prune) { current = path.join(root, w.prune.rel); removeTracked(root, w.prune.rel, w.prune.rec); continue; }
-      if (w.remove) { fs.rmSync(w.abs, { force: true }); continue; }
+      if (w.prune) { current = path.join(root, w.prune.rel); removeTracked(root, w.prune.rel, w.prune.rec); injectedFailure(); continue; }
+      if (w.remove) { fs.rmSync(w.abs, { force: true }); injectedFailure(); continue; }
       ensureDir(path.dirname(w.abs));
       writeKeepingLinks(w.abs, w.data);
       if (w.exec) {
@@ -631,13 +712,20 @@ export async function runInstall(ctx, opts = {}) {
           notices.push(`Windows cannot record the executable bit: after committing, run "git update-index --chmod=+x ${toPosix(path.relative(root, w.abs))}" (or call it as "sh ${toPosix(path.relative(root, w.abs))}")`);
         }
       }
+      injectedFailure();
     }
-    current = path.join(root, '.baton', 'manifest.json');
-    if (manifestAction !== 'unchanged') saveManifest(root, manifest);
+    current = manifestAbs;
+    if (manifestAction !== 'unchanged') { saveManifest(root, manifest); injectedFailure(); }
   } catch (err) {
+    const rollbackFailures = rollbackFiles(snapshots, createdDirs);
+    if (rollbackFailures.length) {
+      throw new BatonError(`install failed at ${toPosix(path.relative(root, current || root))} and rollback was incomplete: ${rollbackFailures.join('; ')}`, {
+        code: 'ROLLBACK_FAILED', hint: 'preserve the repository and restore the listed paths from version control or backup before retrying',
+      });
+    }
     if (err instanceof BatonError || !['EPERM', 'EACCES', 'EBUSY', 'EROFS'].includes(err.code)) throw err;
     throw new BatonError(`cannot write ${toPosix(path.relative(root, current || root))}: ${err.code} (is it read-only or open in another program?)`, {
-      code: 'IO', hint: 'fix the file, then re-run "baton init": it is safe to repeat and finishes the install',
+      code: 'IO', hint: 'the partial install was rolled back; fix the file, then re-run the command',
     });
   }
   if (mode === 'init' && (newProject || !readEvents(root).some((ev) => ev.kind === 'init'))) {
