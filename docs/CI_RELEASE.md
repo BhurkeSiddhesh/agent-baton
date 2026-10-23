@@ -15,6 +15,7 @@ The [CI workflow](../.github/workflows/ci.yml) runs on pull requests, pushes to 
 | Package integrity | Ubuntu / Node 20 | Archive validation, offline install, cold-start/footprint measurements and no-network CLI smoke |
 | Release gate | Version-tag validation only | Requires all seven job groups to succeed **and** tag to equal `v` + package version; cancellation/skip/failure never counts as ready |
 | Release candidate | Version tags, after release gate succeeds | Re-packs the tagged tree, validates the archive, computes SHA-256 and uploads an installable tarball without publishing |
+| Published-release verification | Ubuntu, Windows, macOS / Node 20 | Re-fetches the tag from GitHub, proves the npm archive matches the tagged checkout, installs it offline, and aligns release metadata with the package and changelog |
 
 Failed full and security suites upload their captured logs as artifacts (7-day retention). Matrix jobs use `fail-fast: false` to preserve diagnostics on all tested platforms. The manifest from `npm pack` is retained; the archive is smoke-installed from a local path with `--offline` and no install scripts.
 
@@ -42,6 +43,9 @@ The `node --test` wildcard commands above assume shell glob expansion (as used b
 4. Inspect that tag's **release gate (all required checks)** job. It fails when a prerequisite is not successful or the tag does not exactly match `package.json` version.
 5. Download the **release candidate tarball (gated)** artifact from the same tag run. Independently verify `SHA256SUMS`, inspect `pack.json`, and install the tarball offline before approving publication.
 6. Only then, from a separately approved release workflow or manually, publish the package and verify a clean installation. Never let a pull-request workflow publish packages. Do not place write tokens in untrusted pull-request jobs.
+7. Publishing a GitHub release automatically runs **Verify published release**. Require its metadata job and all three platform install jobs to pass. For an existing release, dispatch the workflow manually with its exact `v<version>` tag.
+
+The post-release workflow checks out the immutable tag, reads its GitHub release metadata, and requires the tag to equal `v` plus `package.json` version. The release name must contain the version and its notes must include the first summary line from that version's `CHANGELOG.md` section. On every supported OS it independently packs both the checked-out source and the same tag fetched over HTTPS from GitHub; names, versions, integrity hashes, sizes, and complete file manifests must match. It then installs the fetched tarball with npm offline and executes the installed CLI. The workflow is read-only and cannot publish, modify, or delete a release.
 
 **Limits:** The gate verifies the workflow results for the tag but does not authenticate the tag pusher, sign artifacts, create branch protections, or publish a release. A separate protected publisher is required for automatic releases.
 

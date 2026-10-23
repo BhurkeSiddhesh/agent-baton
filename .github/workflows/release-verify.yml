@@ -1,0 +1,57 @@
+name: Verify published release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v-prefixed release tag to verify
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  metadata:
+    name: release metadata and source alignment
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Read immutable release metadata
+        run: gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json tagName,name,body,isDraft,isPrerelease,targetCommitish > release.json
+      - name: Match tag, package version, and changelog release notes
+        run: |
+          node .github/scripts/assert-release-tag.mjs "$RELEASE_TAG"
+          node .github/scripts/verify-release-metadata.mjs release.json
+
+  install:
+    name: GitHub install smoke (${{ matrix.os }})
+    needs: [metadata]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Compare GitHub source package and install fetched artifact
+        run: node .github/scripts/verify-github-install.mjs "$GITHUB_REPOSITORY" "$RELEASE_TAG"
