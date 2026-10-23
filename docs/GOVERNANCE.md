@@ -34,6 +34,8 @@ The project currently declares `0.1.x`, Node 18+ and zero required runtime depen
 
 Before version 1.0, follow the existing semver scheme but do **not** infer that every minor release is non-breaking. Potentially breaking changes must be labeled and explained in the release notes with a concrete upgrade or rollback procedure. Users should pin known-good versions for production and stage upgrades in disposable repositories.
 
+Ledger readers accept checksum-valid legacy events without `hv` as v0 and current `hv: 1` events only after structural schema validation. Malformed events and unknown future versions are reported by `baton ledger verify`/`baton check` and excluded from replay and import; they cannot authorize state changes. Format migration must append traceable evidence or use an explicit upgrade tool—never edit checksum-bound history in place.
+
 ## Deprecation and migration
 
 1. Create a tracked issue describing the motivation, old behavior and migration/rollback path. Mark security changes separately.
