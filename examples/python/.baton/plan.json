@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "goal": "Build robust Python calculator module with mathematical validation",
+  "tracks": [
+    {
+      "id": "math-engine",
+      "owner": "codex",
+      "theme": "Mathematical Functions",
+      "owns": [
+        "src/calculator.py",
+        "tests/test_calculator.py"
+      ]
+    }
+  ],
+  "gates": [],
+  "milestones": [
+    {
+      "id": "M1",
+      "title": "v1.0 Release",
+      "due": "2026-11-01"
+    }
+  ],
+  "packets": [
+    {
+      "id": "WP-001",
+      "title": "Implement core mathematical functions and unit tests",
+      "track": "math-engine",
+      "agent": "codex",
+      "reviewer": "claude",
+      "profile": "workspace-write",
+      "owns": [
+        "src/calculator.py",
+        "tests/test_calculator.py"
+      ],
+      "reads": [
+        "pyproject.toml"
+      ],
+      "deps": [],
+      "needs_done": [],
+      "gate": null,
+      "gate_mode": "start",
+      "priority": "P0",
+      "milestone": "M1",
+      "stretch": false,
+      "test": "python -m unittest discover -s tests -p \"test_*.py\"",
+      "description": "Implement add, subtract, multiply, divide, power, factorial functions with type checks and unittest coverage.",
+      "done_checks": [
+        "arithmetic functions implemented",
+        "type checking rejects invalid arguments",
+        "zero division and negative factorials properly handled",
+        "unittest suite passes without errors"
+      ]
+    }
+  ]
+}

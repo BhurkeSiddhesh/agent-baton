@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "project": {
+    "name": "example-python-calculator",
+    "description": "Python example project using Agent Baton orchestration",
+    "stack": ["python"]
+  },
+  "orchestrator": "claude",
+  "agents": [
+    {
+      "id": "claude",
+      "name": "Claude",
+      "kind": "claude",
+      "roles": ["orchestrator", "reviewer", "auditor"],
+      "strengths": ["architecture", "review", "security"]
+    },
+    {
+      "id": "codex",
+      "name": "Codex",
+      "kind": "codex",
+      "roles": ["worker", "reviewer"],
+      "strengths": ["backend", "testing", "algorithms"]
+    }
+  ],
+  "test": {
+    "command": "python -m unittest discover -s tests -p \"test_*.py\"",
+    "required": true,
+    "timeoutSeconds": 60
+  },
+  "protected": {
+    "globs": [
+      ".env*",
+      "secrets/**"
+    ]
+  },
+  "coordination": [],
+  "lease": {
+    "hours": 8
+  },
+  "escalateAfterRejections": 2,
+  "requireDifferentReviewer": true,
+  "branches": {
+    "main": "main",
+    "trackPrefix": "track/",
+    "packetPrefix": "baton/"
+  },
+  "guard": {
+    "mode": "warn"
+  },
+  "ledger": {
+    "mirror": true
+  }
+}
