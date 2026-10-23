@@ -3,7 +3,7 @@ import { BatonError, UsageError } from '../lib/errors.js';
 import { load, recordVerify } from '../lib/engine.js';
 import { isGit, currentBranch, headCommit, mainRef, changedFiles, gitOk, gitOut, isDirty } from '../lib/git.js';
 import { ownedBy, isProtected, isCoordination, BUILTIN_COORDINATION } from '../lib/glob.js';
-import { scanFiles, scanHistory, formatSecretHit } from '../lib/secrets.js';
+import { scanFiles, scanHistory, formatSecretHit, redactSecrets } from '../lib/secrets.js';
 import { diffSnapshot, packetFingerprint } from '../lib/snapshot.js';
 import { stamp, utcnow } from '../lib/util.js';
 import { hasRole } from '../lib/config.js';
@@ -177,6 +177,7 @@ export async function verifyPacket(ctx, pid, { runTests = true, allowShell = fal
     tests.tail = tailOf(r.output);
     if (r.timedOut) tests.tail = `${tests.tail}\ntests timed out after ${secs}s`.trim();
     if (r.error) tests.tail = `${tests.tail}\ncould not run the test command: ${r.error}`.trim();
+    tests.tail = redactSecrets(tests.tail);
   }
   if (tests.ran && !tests.ok) problems.push(tests.timedOut ? 'tests timed out' : `tests failed (exit ${tests.exitCode})`);
 
