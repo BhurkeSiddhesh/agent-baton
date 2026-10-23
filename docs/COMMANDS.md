@@ -789,7 +789,7 @@ Options:
 ### baton merge
 
 ```text
-baton merge <packet> --by <orchestrator> [--json]
+baton merge <packet> --by <orchestrator> [--hosted] [--json]
 
 Fast-forward main to an ACCEPTED packet commit (never creates merge commits)
 
@@ -798,6 +798,7 @@ Only ACCEPTED packets whose begin base is in integration history; main must fast
 Options:
       --by <v>     the orchestrator (or BATON_AGENT)
   -a, --agent <v>  alias of --by
+      --hosted     enforce hosted platform CI and review policies
       --json       print a JSON document
   -h, --help       show this help
 ```

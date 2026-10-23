@@ -219,7 +219,7 @@ export function appendEvent(root, partial) {
       hv: LEDGER_VERSION,
     };
     if (partial.op_id != null && String(partial.op_id).trim()) ev.op_id = String(partial.op_id).trim();
-    const prov = partial.prov !== undefined ? partial.prov : resolveExecutionProvenance();
+    const prov = partial.prov !== undefined ? partial.prov : resolveExecutionProvenance(partial.env || process.env);
     if (prov != null) ev.prov = prov;
     if (partial.sig != null) ev.sig = partial.sig;
     const stream = eventStream(ev);

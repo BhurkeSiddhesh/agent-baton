@@ -1,16 +1,19 @@
 import { BatonError, UsageError } from '../lib/errors.js';
-import { load, postMessage, checkIdentity } from '../lib/engine.js';
-import { appendEvent, assertSensitiveReplay } from '../lib/store.js';
+import { load, postMessage, checkIdentity, readVerifyMarker } from '../lib/engine.js';
+import { appendEvent, assertSensitiveReplay, readEvents } from '../lib/store.js';
 import { git, gitOk, gitOut, isGit, mainRef, listWorktrees } from '../lib/git.js';
+import { getAgent } from '../lib/config.js';
+import { isProtected, matchPath, normPath } from '../lib/glob.js';
 
 export const name = 'merge';
 export const group = 'Execution';
 export const summary = 'Fast-forward main to an ACCEPTED packet commit (never creates merge commits)';
-export const usage = 'baton merge <packet> --by <orchestrator> [--json]';
+export const usage = 'baton merge <packet> --by <orchestrator> [--hosted] [--json]';
 export const description = 'Only ACCEPTED packets whose begin base is in integration history; main must fast-forward to the exact reviewed commit. Unfinished packets may sync and reverify after main advances; accepted packets need a replacement if main advances. Publish ledger events on main after merge.';
 export const options = {
   by: { type: 'string', description: 'the orchestrator (or BATON_AGENT)' },
   agent: { type: 'string', alias: 'a', description: 'alias of --by' },
+  hosted: { type: 'boolean', description: 'enforce hosted platform CI and review policies' },
   json: { type: 'boolean', description: 'print a JSON document' },
 };
 
@@ -23,7 +26,8 @@ export async function run(ctx, args) {
   assertSensitiveReplay(root, { packet: pid, action: 'merge', config });
   checkIdentity(by, ctx.env, config);
   if (by !== config.orchestrator && by !== 'human') throw new BatonError(`only the orchestrator (${config.orchestrator}) or human may merge; got ${by}`, { code: 'NOT_ORCHESTRATOR' });
-  if (!plan.packets.some((p) => p.id === pid)) throw new BatonError(`unknown packet ${pid}`, { code: 'UNKNOWN_PACKET' });
+  const p = plan.packets.find((x) => x.id === pid);
+  if (!p) throw new BatonError(`unknown packet ${pid}`, { code: 'UNKNOWN_PACKET' });
   const s = state.packets[pid];
   if (s.status !== 'ACCEPTED') throw new BatonError(`${pid} is ${s.status}; only ACCEPTED packets can be merged`, { code: 'NOT_ACCEPTED' });
   if (!s.commit) throw new BatonError(`${pid} has no recorded commit (shared-tree work); there is nothing to merge`, { code: 'NO_COMMIT' });
@@ -31,6 +35,129 @@ export async function run(ctx, args) {
   const main = mainRef(root, config.branches?.main);
   if (!main) throw new BatonError('no main branch found', { code: 'NO_MAIN' });
   if (!gitOk(root, ['cat-file', '-e', `${s.commit}^{commit}`])) throw new BatonError(`commit ${s.commit} is not in this repository`, { code: 'COMMIT_MISSING' });
+
+  // 1. Validate that a packet's accepted commit has valid verification evidence matching exact commit SHA
+  const marker = readVerifyMarker(root, pid);
+  if (marker) {
+    if (marker.ok === false) {
+      throw new BatonError(`packet ${pid} verification failed; cannot merge unverified commit`, { code: 'UNVERIFIED_COMMIT' });
+    }
+    if (marker.commit && marker.commit !== s.commit) {
+      throw new BatonError(`commit ${s.commit.slice(0, 8)} does not match verified marker (${marker.commit.slice(0, 8)})`, { code: 'VERIFY_MISMATCH' });
+    }
+  }
+
+  const events = readEvents(root);
+  const verifyEvents = events.filter((e) => e.packet === pid && e.kind === 'verify' && e.data?.ok);
+  const latestVerify = verifyEvents[verifyEvents.length - 1];
+  const matchingVerify = verifyEvents.find((e) => e.data?.commit === s.commit);
+
+  if (!matchingVerify && (!marker || marker.commit !== s.commit || !marker.ok)) {
+    throw new BatonError(`commit ${s.commit.slice(0, 8)} has no valid verification evidence matching exact commit SHA`, { code: 'UNVERIFIED_COMMIT' });
+  }
+
+  // 2. Validate verdict event and actor identities (reject forged or mismatched actor)
+  const verdictEvents = events.filter((e) => e.packet === pid && e.kind === 'verdict' && e.to === 'ACCEPTED');
+  const verdictEvent = verdictEvents[verdictEvents.length - 1];
+  if (!verdictEvent) {
+    throw new BatonError(`packet ${pid} has no recorded acceptance verdict in ledger`, { code: 'NOT_ACCEPTED' });
+  }
+
+  if (by !== 'human') {
+    const orchAgent = getAgent(config, by);
+    if (orchAgent?.github && ctx.env?.GITHUB_ACTIONS === 'true' && ctx.env?.GITHUB_ACTOR) {
+      if (ctx.env.GITHUB_ACTOR.toLowerCase() !== orchAgent.github.toLowerCase()) {
+        throw new BatonError(`GitHub actor "${ctx.env.GITHUB_ACTOR}" does not match orchestrator "${by}" (expected "${orchAgent.github}")`, {
+          code: 'IDENTITY_MISMATCH',
+        });
+      }
+    }
+  }
+
+  if (verdictEvent.by && verdictEvent.by !== 'human') {
+    const revAgent = getAgent(config, verdictEvent.by);
+    if (revAgent?.github && verdictEvent.prov?.gh?.actor) {
+      if (verdictEvent.prov.gh.actor.toLowerCase() !== revAgent.github.toLowerCase()) {
+        throw new BatonError(`verdict on ${pid} has identity mismatch: GitHub actor "${verdictEvent.prov.gh.actor}" does not match reviewer "${verdictEvent.by}" (${revAgent.github})`, {
+          code: 'IDENTITY_MISMATCH',
+        });
+      }
+    }
+  }
+
+  // 3. Enforce config.security?.requireHumanReview on sensitive/risky changes
+  if (config.security?.requireHumanReview) {
+    let changed = [];
+    if (s.base && gitOk(root, ['cat-file', '-e', `${s.base}^{commit}`])) {
+      const diff = gitOut(root, ['diff', '--name-only', s.base, s.commit]);
+      if (diff) changed = diff.split(/\r?\n/).map((f) => f.trim()).filter(Boolean);
+    } else {
+      const diff = gitOut(root, ['diff-tree', '--no-commit-id', '--name-only', '-r', s.commit]);
+      if (diff) changed = diff.split(/\r?\n/).map((f) => f.trim()).filter(Boolean);
+    }
+    const allPaths = [...new Set([...changed, ...(p.owns || [])])];
+    const extraProtected = config.protected?.globs || [];
+    const humanReviewGlobs = Array.isArray(config.security.requireHumanReview) ? config.security.requireHumanReview : [];
+
+    const isRisky = (f) => {
+      if (isProtected(f, extraProtected)) return true;
+      const lower = normPath(f).toLowerCase();
+      if (lower === 'security.md' || lower.includes('/security') || lower.startsWith('security/') || lower.includes('security.')) return true;
+      if (lower.startsWith('.github/workflows/')) return true;
+      if (humanReviewGlobs.length && humanReviewGlobs.some((g) => matchPath(g, f, true))) return true;
+      return false;
+    };
+
+    const riskyFiles = allPaths.filter(isRisky);
+    if (riskyFiles.length > 0) {
+      const isHumanApproved = verdictEvent.by === 'human' || verdictEvent.data?.humanApproval === true || verdictEvent.data?.humanReview === true;
+      if (!isHumanApproved) {
+        throw new BatonError(`packet ${pid} includes sensitive/risky changes (${riskyFiles.join(', ')}) requiring human review (config.security.requireHumanReview); accepted by agent "${verdictEvent.by}"`, {
+          code: 'HUMAN_REVIEW_REQUIRED',
+          hint: 'have a human review and accept the packet before merge',
+        });
+      }
+    }
+  }
+
+  // 4. In hosted mode (--hosted or config.merge?.requireCi), check CI checks and platform review policies
+  const isHosted = Boolean(args.hosted || config.merge?.requireCi || config.merge?.requirePlatformReview || config.merge?.hosted);
+  if (isHosted) {
+    const hasPlatformReview = verdictEvent.prov?.trust === 'github-verified'
+      || verdictEvent.data?.platformReview === true
+      || verdictEvent.data?.platformApproval === true
+      || verdictEvent.data?.gh_review === 'APPROVED';
+
+    if (!hasPlatformReview) {
+      throw new BatonError(`packet ${pid} review was self-asserted locally by "${verdictEvent.by}"; hosted platform review approval is required before merge`, {
+        code: 'PLATFORM_REVIEW_REQUIRED',
+        hint: 'require approved GitHub pull request review or execute review inside verified CI runner',
+      });
+    }
+
+    const verifyEv = matchingVerify || latestVerify;
+    if (verifyEv) {
+      if (verifyEv.data?.ok === false || verifyEv.data?.ci_status === 'failure') {
+        throw new BatonError(`packet ${pid} commit ${s.commit.slice(0, 8)} failed required CI checks`, {
+          code: 'CI_FAILED',
+        });
+      }
+      if (config.merge?.requireCi) {
+        const hasCiEvidence = verifyEv.prov?.trust === 'github-verified'
+          || verifyEv.prov?.trust === 'ci-environment'
+          || verifyEv.data?.ci === true
+          || verifyEv.data?.ci_status === 'success'
+          || ctx.env?.CI === 'true'
+          || ctx.env?.GITHUB_ACTIONS === 'true';
+
+        if (!hasCiEvidence) {
+          throw new BatonError(`packet ${pid} commit ${s.commit.slice(0, 8)} lacks required CI verification evidence (config.merge.requireCi)`, {
+            code: 'CI_REQUIRED',
+          });
+        }
+      }
+    }
+  }
 
   const mainSha = gitOut(root, ['rev-parse', `refs/heads/${main}`]);
   let moved = false;
