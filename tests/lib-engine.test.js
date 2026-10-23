@@ -7,7 +7,7 @@ import {
   setGate, recordVerify, readyPackets, nextFor, blockingDeps, addFinding, resolveFinding, findingsOf, postMessage, scores, progress, auditEvents,
   acknowledge, readVerifyMarker,
 } from '../src/lib/engine.js';
-import { appendEvent, readEvents } from '../src/lib/store.js';
+import { appendEvent, readEvents, orderEvents } from '../src/lib/store.js';
 import { fingerprint } from '../src/lib/util.js';
 import { headCommit } from '../src/lib/git.js';
 import { makeTempRepo, sampleConfig, samplePlan } from './helpers.js';
@@ -491,6 +491,16 @@ test('derive replays handoff, reviewer change, rejections and merged', () => {
   ]);
   assert.deepEqual([s.packets['WP-001'].reviewer, s.packets['WP-001'].agent, s.packets['WP-001'].rejections, s.packets['WP-001'].merged, s.gates.G1.open],
     ['gemini', 'gemini', 1, 'abc', true]);
+});
+
+test('identical causal event sets derive identical packet state despite delivery order and clock skew', () => {
+  const plan = samplePlan();
+  const blocked = { id: '20260102T000000Z-000001', ts: '2026-01-02T00:00:00Z', packet: 'WP-001', kind: 'status', to: 'BLOCKED', by: 'codex', note: 'wait', data: {}, rev: 1, parents: [] };
+  const begun = { id: '20260101T000000Z-000002', ts: '2026-01-01T00:00:00Z', packet: 'WP-001', kind: 'begin', to: 'IN_PROGRESS', by: 'codex', note: '', data: { lease_until: '2026-01-03T00:00:00Z' }, rev: 2, parents: [blocked.id] };
+  const a = derive(plan, orderEvents([begun, blocked]));
+  const b = derive(plan, orderEvents([blocked, begun]));
+  assert.deepEqual(a, b);
+  assert.equal(a.packets['WP-001'].status, 'IN_PROGRESS');
 });
 
 test('auditEvents flags illegal histories and honours acks', () => {

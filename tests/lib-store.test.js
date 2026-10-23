@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
-import { appendEvent, readEvents, verifyLedger, importLedger, exportLedger, stateDir, eventsDir, ledgerDir, eventSha, EVENT_ID_RE, LEDGER_VERSION, EVENT_KINDS, validateEventSchema } from '../src/lib/store.js';
+import { appendEvent, readEvents, verifyLedger, importLedger, exportLedger, stateDir, eventsDir, ledgerDir, eventSha, EVENT_ID_RE, LEDGER_VERSION, EVENT_KINDS, validateEventSchema, eventStream, orderEvents, eventOrderingProblems } from '../src/lib/store.js';
 import { makeTempRepo, REPO } from './helpers.js';
 
 const app = (root, over = {}) => appendEvent(root, { packet: 'WP-001', kind: 'status', to: 'BLOCKED', by: 'codex', ...over });
@@ -16,7 +16,7 @@ test('appendEvent fills id/ts/hv/sha and writes local + mirror', () => {
     const ev = app(repo.root, { note: 'hi', data: { a: 1 } });
     assert.match(ev.id, EVENT_ID_RE);
     assert.ok(ev.id.startsWith('20261013T101500Z-'));
-    assert.deepEqual([ev.ts, ev.hv, ev.note, ev.data], ['2026-10-13T10:15:00Z', LEDGER_VERSION, 'hi', { a: 1 }]);
+    assert.deepEqual([ev.ts, ev.hv, ev.rev, ev.parents, ev.note, ev.data], ['2026-10-13T10:15:00Z', LEDGER_VERSION, 1, [], 'hi', { a: 1 }]);
     assert.equal(ev.sha, eventSha(ev));
     assert.ok(fs.existsSync(path.join(eventsDir(repo.root), `${ev.id}.json`)));
     assert.ok(fs.existsSync(path.join(ledgerDir(repo.root), `${ev.id}.json`)));
@@ -240,4 +240,43 @@ test('a clock that runs backwards never reorders the ledger: ts is clamped to th
     assert.ok(a.id < b.id && b.id < c.id);
     assert.deepEqual(readEvents(repo.root).map((e) => e.note), ['a', 'b', 'c']);
   } finally { delete process.env.BATON_NOW; repo.cleanup(); }
+});
+
+test('causal parents override skewed timestamps and equivalent sets replay identically', () => {
+  const base = { packet: 'WP-001', kind: 'status', to: 'BLOCKED', by: 'codex', note: '', data: {}, hv: 1, sha: '0'.repeat(64) };
+  const parent = { ...base, id: '20260102T000000Z-000001', ts: '2026-01-02T00:00:00Z', rev: 1, parents: [] };
+  const child = { ...base, id: '20260101T000000Z-000002', ts: '2026-01-01T00:00:00Z', rev: 2, parents: [parent.id] };
+  assert.deepEqual(orderEvents([child, parent]).map((ev) => ev.id), [parent.id, child.id]);
+  assert.deepEqual(orderEvents([parent, child]).map((ev) => ev.id), [parent.id, child.id]);
+  assert.equal(eventStream(parent), 'packet:WP-001');
+});
+
+test('concurrent clone siblings and missing causal parents are explicit conflicts', () => {
+  const common = { packet: 'WP-001', kind: 'begin', to: 'IN_PROGRESS', by: 'codex', note: '', data: {}, hv: 1, rev: 2, parents: ['20260101T000000Z-000001'], sha: '0'.repeat(64) };
+  const a = { ...common, id: '20260102T000000Z-000002', ts: '2026-01-02T00:00:00Z' };
+  const b = { ...common, id: '20260102T000000Z-000003', ts: '2026-01-02T00:00:00Z', by: 'claude' };
+  const problems = eventOrderingProblems([a, b]);
+  assert.ok(problems.some((p) => /concurrent revision conflict/.test(p.problem)));
+  assert.equal(problems.filter((p) => /missing causal parent/.test(p.problem)).length, 2);
+  const cycleA = { ...a, rev: 3, parents: [b.id] };
+  const cycleB = { ...b, rev: 4, parents: [a.id] };
+  assert.ok(eventOrderingProblems([cycleA, cycleB]).some((p) => /causal parent cycle/.test(p.problem)));
+});
+
+test('a reconciled clone refuses new writes while same-revision siblings remain', () => {
+  const repo = makeTempRepo({ config: true });
+  try {
+    const parent = app(repo.root);
+    const sibling = (id, by) => {
+      const ev = { ...parent, id, ts: '2026-01-02T00:00:00Z', by, rev: 2, parents: [parent.id] };
+      ev.sha = eventSha(ev);
+      return ev;
+    };
+    const a = sibling('20260102T000000Z-000002', 'codex');
+    const b = sibling('20260102T000000Z-000003', 'claude');
+    fs.writeFileSync(path.join(eventsDir(repo.root), `${a.id}.json`), JSON.stringify(a));
+    fs.writeFileSync(path.join(ledgerDir(repo.root), `${b.id}.json`), JSON.stringify(b));
+    assert.ok(verifyLedger(repo.root).some((p) => /concurrent revision conflict/.test(p.problem)));
+    assert.throws(() => app(repo.root), (e) => e.code === 'LEDGER_CONFLICT' && /ledger verify/.test(e.hint));
+  } finally { repo.cleanup(); }
 });

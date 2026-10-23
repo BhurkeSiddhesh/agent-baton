@@ -36,6 +36,8 @@ Before version 1.0, follow the existing semver scheme but do **not** infer that 
 
 Ledger readers accept checksum-valid legacy events without `hv` as v0 and current `hv: 1` events only after structural schema validation. Malformed events and unknown future versions are reported by `baton ledger verify`/`baton check` and excluded from replay and import; they cannot authorize state changes. Format migration must append traceable evidence or use an explicit upgrade tool—never edit checksum-bound history in place.
 
+New ledger writes include per-stream revisions and causal parents. Identical event sets replay in deterministic causal order across clones even with clock skew or out-of-order delivery. Concurrent events for the same stream revision and missing parents are reported as reconciliation errors; operators must resolve the clone divergence before treating the ledger as authoritative.
+
 ## Deprecation and migration
 
 1. Create a tracked issue describing the motivation, old behavior and migration/rollback path. Mark security changes separately.

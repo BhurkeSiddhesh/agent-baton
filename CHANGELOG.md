@@ -6,6 +6,8 @@ All notable changes to Agent Baton are documented here. The format follows
 
 ## [Unreleased]
 
+- New ledger writes record per-stream revisions and causal parents; replay is deterministic across clones, while concurrent sibling revisions and missing parents are reported as reconciliation errors.
+
 - Ledger events now use enforced versioned schemas at append, read, verification and import boundaries; malformed and future-version events are excluded from replay while legacy pre-version events remain readable.
 
 - Added read-only post-release verification that aligns GitHub release metadata with the tag, package version and changelog, compares the fetched GitHub package byte-for-byte with the tagged checkout, and smoke-installs it on Linux, Windows and macOS.

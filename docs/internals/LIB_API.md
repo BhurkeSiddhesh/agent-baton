@@ -143,7 +143,7 @@ means "everything under this directory" (`dir/` is sugar for `dir/**`), everythi
 - `stateDir(root)`: `<git common dir>/baton/` in git, else `<root>/.baton/state/` (created on demand). `stateSub(root, 'verified'|'snapshots'|...)`,
   `eventsDir(root)`, `ledgerDir(root)` (= `<root>/.baton/ledger`).
 - `appendEvent(root, {packet?, kind, to?, by?, note?, data?}) -> event`: under the state lock; fills `id` (`YYYYMMDDTHHMMSSZ-<6 hex>`, strictly increasing even inside one
-  second), `ts`, `hv`, `sha`; validates the versioned event shape and writes the local file plus the optional mirror. Shape validation does not authorize lifecycle transitions: use engine functions for state changes. Throws `BAD_EVENT`, `BAD_EVENT_SCHEMA`, or `LEDGER_NEWER`.
+  second), `ts`, `hv`, `rev`, `parents`, `sha`; validates the versioned event shape and writes the local file plus the optional mirror. Shape validation does not authorize lifecycle transitions: use engine functions for state changes. Throws `BAD_EVENT`, `BAD_EVENT_SCHEMA`, `LEDGER_NEWER`, or `LEDGER_CONFLICT` when causal conflicts must be reconciled before another write.
 - `readEvents(root) -> event[]`: union of local and mirror, de-duplicated by id (local wins), sorted by `(ts, id)`; unreadable, checksum-invalid, schema-invalid and future-version events are quarantined from replay and reported by `verifyLedger`.
 - `verifyLedger(root) -> [{id, where: 'local'|'mirror'|'both', severity: 'error'|'warn', problem, acked}]`: unreadable JSON, id/file mismatch, missing/wrong `sha`, local and
   mirror copies that differ (errors); a local event missing from the mirror (warn). `acked` is true when an `ack` event names the id. Empty array = healthy.
