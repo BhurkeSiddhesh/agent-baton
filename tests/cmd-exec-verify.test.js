@@ -138,6 +138,18 @@ test('failing tests fail verify and keep the output tail; the marker is not subm
   assert.match(s.stderr, /verify/);
 });
 
+test('tests output containing secrets is sanitized via redactSecrets in tests.tail', async () => {
+  const secretKey = `${'AKIA'}${'IOSFODNN7EXAMPLE'}`;
+  const r = repo({ config: sampleConfig({ test: { command: `node -e "console.log('error with key: ${secretKey}');process.exit(1)"`, required: true, timeoutSeconds: 60 } }) });
+  await begin(r);
+  r.write('src/api/export.js', 'x\n');
+  const { status, result } = await verify(r);
+  assert.equal(status, 1);
+  assert.equal(result.tests.ok, false);
+  assert.ok(result.tests.tail.includes('[REDACTED:aws-access-key]'));
+  assert.ok(!result.tests.tail.includes(secretKey));
+});
+
 test('a hanging test command is killed at the timeout', async () => {
   const r = repo({ config: sampleConfig({ test: { command: 'node -e "setTimeout(() => {}, 60000)"', required: true, timeoutSeconds: 1 } }) });
   await begin(r);

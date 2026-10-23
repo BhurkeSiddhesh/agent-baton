@@ -170,9 +170,12 @@ All kinds require string `by`; packet kinds require string `packet`; transition 
 
 ## 11. `secrets.js`
 
-- `SECRET_PATTERNS = [{id, re}]` (AWS, private key, Google OAuth/refresh/client secret, GitHub `gh[pousr]_`, Slack `xox[abprs]-`, `sk-` keys, token/secret/password assignments).
+- `SECRET_PATTERNS = [{id, re}]` (AWS access/secret/session tokens, private keys, Google OAuth/refresh/client secret/Gemini AI keys, GitHub `gh[pousr]_` and fine-grained, GitLab tokens, Slack `xox[abprs]-`, Anthropic and OpenAI keys, Azure storage access keys, Stripe keys and restricted keys, JWT, generic token/secret/password assignments).
+- `MAX_SCAN_BYTES = 2 * 1024 * 1024` (2MB scan size ceiling).
+- `redactSecrets(text) -> string` (replaces matched secret patterns with `[REDACTED:<pattern-id>]` without leaking secret values).
 - `scanText(label, text) -> [{label, line, pattern}]` (a line containing `baton:allow-secret` is skipped). Findings never contain the secret text.
-- `scanFiles(root, rels) -> findings` (missing files and directories skipped; unreadable ones report pattern `unreadable`; handles CRLF and UTF-16).
+- `scanFiles(root, rels) -> findings` (missing files and directories skipped; unreadable ones report pattern `unreadable`; oversized files > 2MB report `oversized-skipped`; handles CRLF, UTF-16, and binary files with NUL bytes).
+- `scanLedgerAndLogs(root) -> findings` (scans `.baton/ledger/`, `.baton/state/events/`, and `.baton/logs/` files for sensitive credential inclusion).
 - `scanHistory(root, base) -> findings` for added lines of `base..HEAD` (label `commit history`); `[]` when `base` is null or git fails.
 - `formatSecretHit(hit) -> 'file:line: matches secret pattern id'`.
 
