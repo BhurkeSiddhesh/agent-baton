@@ -106,9 +106,12 @@ means "everything under this directory" (`dir/` is sugar for `dir/**`), everythi
 - `matchPath(pattern, path) -> boolean`
 - `patternsOverlap(a, b) -> boolean`: could one path match both? Conservative and symmetric.
 - `ownedBy(path, owns[]) -> boolean`
-- `isProtected(path, extraGlobs = []) -> boolean`: `.git`/`secrets` as any path segment, `.env`, `.env.*` (not `.env.example`), `*.pem`, `*.key`,
-  `*.p12`, `*.pfx`, `id_rsa*`, `*credentials*.json`, `client_secret*.json`, `token*.json`, `*.sqlite`, `*.sqlite3`, `*.db`; extra globs without a
-  `/` match the file name at any depth, others match the full path.
+- `isProtected(path, extraGlobs = []) -> boolean`: `.git`/`secrets`/`.aws`/`.azure`/`.gcloud` as any path segment, `.env`, `.env.*` (not `.env.example`), `*.pem`, `*.key`,
+  `*.p12`, `*.pfx`, `*.crt`, `*.cer`, `*.der`, `*.p8`, `id_rsa*`, `id_ed25519*`, `id_ecdsa*`, `id_dsa*`, `*credentials*.json`, `client_secret*.json`, `token*.json`,
+  `*azure*token*`, `*.sqlite`, `*.sqlite3`, `*.db`, `*.duckdb`, `*.kdbx`, `.aws/credentials`, `gcloud/credentials.db`; extra globs without a
+  `/` match the file name at any depth, others match the full path (case-insensitive across platforms).
+- `isOrchestratorOnly(path, extra = []) -> boolean`: checks against orchestrator-only paths (`.baton/config.json`, `AGENTS.md`, `docs/GOVERNANCE.md`).
+- `isReadOnly(path, extra = []) -> boolean`: checks against read-only governance/config paths.
 - `isCoordination(path, extra = []) -> boolean`; `BUILTIN_COORDINATION = ['.baton/ledger/', '.baton/state/', '.baton/views/']`; `normPath(p)`.
 
 ## 7. `config.js`

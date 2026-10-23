@@ -6,6 +6,8 @@ All notable changes to Agent Baton are documented here. The format follows
 
 ## [Unreleased]
 
+- Strengthened protected path policies and configuration immutability (BAT-016); expanded sensitive path detection to cover certificates (*.crt, *.cer, *.der, *.p8), SSH keys (id_ed25519, id_ecdsa), cloud credentials (.aws/credentials, gcloud credentials.db, azure tokens), and sensitive DBs (*.duckdb, *.kdbx). Enforces case-insensitive protection across platforms, rejects attempts to claim protected paths in plans, establishes orchestrator-only paths (.baton/config.json, AGENTS.md, docs/GOVERNANCE.md) with controlled migration exceptions, and prevents plans from defining or silently relaxing security policies.
+
 - Added execution identity provenance and session tracking (`resolveExecutionProvenance`); separates caller-asserted actor IDs (`--agent`) from verifiable runner and GitHub identities, stamps tamper-evident session IDs (`sess-*`, `gh-*`) and declared trust levels (`github-verified`, `ci-environment`, `local-unverified`) on ledger events, and enforces `requireActorMatch` in `checkIdentity` to prevent GitHub Actions identity spoofing.
 
 - Introduced least-privilege execution profiles (`read-only`, `workspace-write`, `review-only`, `privileged`); enforced in plan validation and tool-call guard hooks (`baton guard`) to restrict file writes, shell execution and network access. Unauthorized escalation to `privileged` by non-orchestrator agents is rejected, and unsupported OS-level/kernel sandbox requests fail closed with explicit enforcement disclosures.

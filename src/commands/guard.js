@@ -2,9 +2,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { BatonError, UsageError } from '../lib/errors.js';
-import { ownedBy, isProtected, isCoordination, normPath } from '../lib/glob.js';
+import { ownedBy, isProtected, isCoordination, isOrchestratorOnly, isReadOnly, normPath } from '../lib/glob.js';
 import { toPosix } from '../lib/util.js';
-import { PERMISSION_PROFILES } from '../lib/config.js';
+import { PERMISSION_PROFILES, hasRole } from '../lib/config.js';
 
 export const name = 'guard';
 export const group = 'Execution';
@@ -132,10 +132,33 @@ const lower = (s) => s.toLowerCase();
 function decide(rel, ctx) {
   const { config, agent, mine, plan } = ctx;
   const extra = config.protected?.globs || [];
+  const orchExtra = config.protected?.orchestratorOnly || [];
+  const readOnlyExtra = config.protected?.readOnly || [];
   const posix = normPath(rel);
-  if (isProtected(posix, extra) || isProtected(lower(posix), extra.map(lower))) return { allow: false, reason: 'protected path (secrets, credentials, databases, .git)' };
+
+  if (isProtected(posix, extra) || isProtected(lower(posix), extra.map(lower))) {
+    const isOrch = agent === config.orchestrator || agent === 'human' || hasRole(config, agent, 'orchestrator');
+    const myPackets = (mine || []).map((id) => plan?.packets?.find((p) => p.id === id)).filter(Boolean);
+    const hasAuthorizedException = isOrch && myPackets.some((p) => p.allow_protected && p.description && String(p.description).trim());
+    if (!hasAuthorizedException) {
+      return { allow: false, reason: 'protected path (secrets, credentials, databases, .git)' };
+    }
+  }
+
   if (isCoordination(lower(posix), (config.coordination || []).map(lower))) return { allow: true };
   if ((agent === config.orchestrator || agent === 'human') && ['.baton/plan.json', '.baton/config.json'].includes(lower(posix))) return { allow: true };
+
+  if (isOrchestratorOnly(posix, orchExtra)) {
+    const isOrch = agent === config.orchestrator || agent === 'human' || hasRole(config, agent, 'orchestrator');
+    if (!isOrch) {
+      return { allow: false, reason: `orchestrator-only path (${posix}) requires orchestrator role` };
+    }
+  }
+
+  if (isReadOnly(posix, readOnlyExtra) && !isOrchestratorOnly(posix, orchExtra)) {
+    return { allow: false, reason: `read-only path (${posix}) cannot be modified` };
+  }
+
   if (!agent) return { allow: true }; // unidentified actor: only the protected-path rule above applies
   if (!mine.length) return { allow: false, reason: `${agent} has no IN_PROGRESS packet`, noPacket: true };
   const owned = mine.find((id) => ownedBy(lower(posix), plan.packets.find((p) => p.id === id).owns.map(lower)));
