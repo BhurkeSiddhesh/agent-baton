@@ -818,15 +818,16 @@ Options:
 ### baton ledger
 
 ```text
-baton ledger verify [--json]            check hashes and local/mirror agreement (exit 1 on unacknowledged errors)
-       baton ledger import [--from <dir>]      copy valid events from the tracked mirror (or <dir>) into the local store
-       baton ledger export                     copy valid local events into the tracked mirror (.baton/ledger/)
-       baton ledger reconcile [--json]         restore or reconcile incomplete operations and verify markers
+baton ledger verify [--json]                              check hashes and local/mirror agreement (exit 1 on unacknowledged errors)
+       baton ledger import [--from <dir>] [--dry-run] [--json]    copy safe events from tracked mirror (or <dir>) into local store
+       baton ledger export [--dry-run] [--json]                  copy valid local events into the tracked mirror (.baton/ledger/)
+       baton ledger reconcile [--from <dir>] [--dry-run] [--json] reconcile diverged clone ledgers and incomplete operations
 
 Import, export and verify the event ledger
 
 Options:
-      --from <v>  import: directory of event files (default .baton/ledger)
+      --from <v>  import/reconcile: directory of event files (default .baton/ledger)
+      --dry-run   simulate reconciliation without writing changes to disk
       --json      print a JSON document
   -h, --help      show this help
 ```

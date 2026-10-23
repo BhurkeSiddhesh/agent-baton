@@ -6,6 +6,8 @@ All notable changes to Agent Baton are documented here. The format follows
 
 ## [Unreleased]
 
+- Designed and implemented diverged clone ledger reconciliation (`baton ledger reconcile [--from <dir>] [--dry-run] [--json]`), providing deterministic merging of independent safe events across clones while surfacing corrupt events, missing causal parents, concurrent revision collisions, competing claims, and contradictory verdicts without silent overwrite.
+
 - Multi-event transitions (`begin`, `reclaim`, `submit`, `verdict`, `block`, `handoff`, `reassign`, `gate`) now support explicit operation IDs (`op_id` / `--op-id`) for crash-safe idempotent retries; interrupted transitions recover without duplicate verdict events or broadcast messages, `submit` enforces authenticated ledger verify events, and `baton ledger reconcile` resolves incomplete operations.
 
 - Monotonically increasing fencing tokens (`lease_token`) are now issued on packet claims and takeovers; verify markers bind to the active lease generation, `submit` rejects stale lease tokens, and heartbeats from revoked generations cannot revive expired leases.

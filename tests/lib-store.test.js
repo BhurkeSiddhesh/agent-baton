@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
-import { appendEvent, readEvents, verifyLedger, importLedger, exportLedger, stateDir, eventsDir, ledgerDir, eventSha, EVENT_ID_RE, LEDGER_VERSION, EVENT_KINDS, validateEventSchema, eventStream, orderEvents, eventOrderingProblems } from '../src/lib/store.js';
+import { appendEvent, readEvents, verifyLedger, importLedger, exportLedger, reconcileLedger, stateDir, eventsDir, ledgerDir, eventSha, EVENT_ID_RE, LEDGER_VERSION, EVENT_KINDS, validateEventSchema, eventStream, orderEvents, eventOrderingProblems } from '../src/lib/store.js';
 import { makeTempRepo, REPO } from './helpers.js';
 
 const app = (root, over = {}) => appendEvent(root, { packet: 'WP-001', kind: 'status', to: 'BLOCKED', by: 'codex', ...over });
@@ -278,5 +278,130 @@ test('a reconciled clone refuses new writes while same-revision siblings remain'
     fs.writeFileSync(path.join(ledgerDir(repo.root), `${b.id}.json`), JSON.stringify(b));
     assert.ok(verifyLedger(repo.root).some((p) => /concurrent revision conflict/.test(p.problem)));
     assert.throws(() => app(repo.root), (e) => e.code === 'LEDGER_CONFLICT' && /ledger verify/.test(e.hint));
+  } finally { repo.cleanup(); }
+});
+
+test('BAT-028: reconcileLedger merges safe independent events and supports dry-run', () => {
+  const repo = makeTempRepo({ config: true });
+  const remoteDir = path.join(repo.root, 'remote-ledger');
+  fs.mkdirSync(remoteDir, { recursive: true });
+  try {
+    // Local has event for WP-001
+    const ev1 = appendEvent(repo.root, { packet: 'WP-001', kind: 'status', to: 'IN_PROGRESS', by: 'codex' });
+
+    // Remote has independent events for WP-002
+    const base = { packet: 'WP-002', kind: 'begin', to: 'IN_PROGRESS', by: 'claude', note: 'work', data: { lease_until: '2026-10-23T22:00:00Z' }, hv: 1, rev: 1, parents: [] };
+    const r1 = { ...base, id: '20261023T120000Z-000001', ts: '2026-10-23T12:00:00Z' };
+    r1.sha = eventSha(r1);
+    const r2 = { ...base, id: '20261023T120001Z-000002', ts: '2026-10-23T12:00:01Z', kind: 'ready', to: 'READY_FOR_REVIEW', rev: 2, parents: [r1.id] };
+    r2.sha = eventSha(r2);
+
+    fs.writeFileSync(path.join(remoteDir, `${r1.id}.json`), JSON.stringify(r1, null, 2));
+    fs.writeFileSync(path.join(remoteDir, `${r2.id}.json`), JSON.stringify(r2, null, 2));
+
+    // Dry-run: safe detected, nothing written
+    const dry = reconcileLedger(repo.root, { fromDir: remoteDir, dryRun: true });
+    assert.equal(dry.ok, true);
+    assert.equal(dry.dryRun, true);
+    assert.deepEqual(dry.safe, [r1.id, r2.id]);
+    assert.deepEqual(dry.applied, []);
+    assert.equal(fs.existsSync(path.join(eventsDir(repo.root), `${r1.id}.json`)), false);
+
+    // Real reconcile: safe events applied
+    const real = reconcileLedger(repo.root, { fromDir: remoteDir, dryRun: false });
+    assert.equal(real.ok, true);
+    assert.equal(real.dryRun, false);
+    assert.deepEqual(real.safe, [r1.id, r2.id]);
+    assert.deepEqual(real.applied, [r1.id, r2.id]);
+    assert.equal(fs.existsSync(path.join(eventsDir(repo.root), `${r1.id}.json`)), true);
+    assert.equal(fs.existsSync(path.join(eventsDir(repo.root), `${r2.id}.json`)), true);
+
+    // Subsequent reconcile recognizes them as identical
+    const again = reconcileLedger(repo.root, { fromDir: remoteDir });
+    assert.equal(again.ok, true);
+    assert.equal(again.counts.identical, 2);
+    assert.equal(again.applied.length, 0);
+  } finally { repo.cleanup(); }
+});
+
+test('BAT-028: reconcileLedger detects corrupt events, missing parents, rev conflicts and claim/verdict conflicts', () => {
+  const repo = makeTempRepo({ config: true });
+  const remoteDir = path.join(repo.root, 'remote-diverged');
+  fs.mkdirSync(remoteDir, { recursive: true });
+  try {
+    // Local state: WP-001 is IN_PROGRESS by codex with active lease, WP-003 has verdict ACCEPTED
+    const ev1 = appendEvent(repo.root, {
+      packet: 'WP-001', kind: 'begin', to: 'IN_PROGRESS', by: 'codex',
+      data: { lease_until: '2026-10-23T23:59:59Z', lease_token: 1 },
+    });
+    const ev2 = appendEvent(repo.root, { packet: 'WP-003', kind: 'verdict', to: 'ACCEPTED', by: 'claude' });
+
+    // 1. Corrupt remote file (invalid JSON)
+    fs.writeFileSync(path.join(remoteDir, '20261023T100000Z-corrupt.json'), '{broken');
+
+    // 2. Corrupt remote file (sha mismatch)
+    const badSha = { packet: 'WP-999', kind: 'status', to: 'BLOCKED', by: 'codex', note: '', data: {}, hv: 1, rev: 1, parents: [], id: '20261023T100001Z-000001', ts: '2026-10-23T10:00:01Z', sha: 'wrong' };
+    fs.writeFileSync(path.join(remoteDir, `${badSha.id}.json`), JSON.stringify(badSha));
+
+    // 3. Missing causal parent
+    const missingParent = { packet: 'WP-004', kind: 'status', to: 'IN_PROGRESS', by: 'claude', note: '', data: {}, hv: 1, rev: 2, parents: ['20261023T000000Z-000001'], id: '20261023T100002Z-000002', ts: '2026-10-23T10:00:02Z' };
+    missingParent.sha = eventSha(missingParent);
+    fs.writeFileSync(path.join(remoteDir, `${missingParent.id}.json`), JSON.stringify(missingParent));
+
+    // 4. Revision conflict on WP-001 (same stream and rev 1, different id)
+    const revConflict = { packet: 'WP-001', kind: 'status', to: 'BLOCKED', by: 'gemini', note: 'concurrent rev', data: {}, hv: 1, rev: 1, parents: [], id: '20261023T100003Z-000003', ts: '2026-10-23T10:00:03Z' };
+    revConflict.sha = eventSha(revConflict);
+    fs.writeFileSync(path.join(remoteDir, `${revConflict.id}.json`), JSON.stringify(revConflict));
+
+    // 5. Conflicting claim on WP-001 by gemini (while codex holds active unexpired lease)
+    const claimConflict = {
+      packet: 'WP-001', kind: 'begin', to: 'IN_PROGRESS', by: 'gemini', note: '',
+      data: { lease_until: '2026-10-23T23:59:59Z', lease_token: 1 },
+      hv: 1, rev: 99, parents: [], id: '20261023T100004Z-000004', ts: '2026-10-23T10:00:04Z',
+    };
+    claimConflict.sha = eventSha(claimConflict);
+    fs.writeFileSync(path.join(remoteDir, `${claimConflict.id}.json`), JSON.stringify(claimConflict));
+
+    // 6. Child of claim conflict (dependency_conflict cascade)
+    const depOnConflict = {
+      packet: 'WP-001', kind: 'ready', to: 'READY_FOR_REVIEW', by: 'gemini', note: '', data: {},
+      hv: 1, rev: 100, parents: [claimConflict.id], id: '20261023T100005Z-000005', ts: '2026-10-23T10:00:05Z',
+    };
+    depOnConflict.sha = eventSha(depOnConflict);
+    fs.writeFileSync(path.join(remoteDir, `${depOnConflict.id}.json`), JSON.stringify(depOnConflict));
+
+    // 7. Conflicting verdict on WP-003 (REJECTED vs local ACCEPTED)
+    const verdictConflict = {
+      packet: 'WP-003', kind: 'verdict', to: 'REJECTED', by: 'gemini', note: '', data: {},
+      hv: 1, rev: 99, parents: [], id: '20261023T100006Z-000006', ts: '2026-10-23T10:00:06Z',
+    };
+    verdictConflict.sha = eventSha(verdictConflict);
+    fs.writeFileSync(path.join(remoteDir, `${verdictConflict.id}.json`), JSON.stringify(verdictConflict));
+
+    // 8. Safe independent event for WP-005
+    const safeEv = {
+      packet: 'WP-005', kind: 'status', to: 'PLANNED', by: 'claude', note: 'all good', data: {},
+      hv: 1, rev: 1, parents: [], id: '20261023T100007Z-000007', ts: '2026-10-23T10:00:07Z',
+    };
+    safeEv.sha = eventSha(safeEv);
+    fs.writeFileSync(path.join(remoteDir, `${safeEv.id}.json`), JSON.stringify(safeEv));
+
+    const res = reconcileLedger(repo.root, { fromDir: remoteDir });
+    assert.equal(res.ok, false);
+    assert.ok(res.skipped.some((s) => s.id === '20261023T100000Z-corrupt'));
+    assert.ok(res.skipped.some((s) => s.id === badSha.id && s.type === 'sha_mismatch'));
+    assert.ok(res.conflicts.some((c) => c.id === missingParent.id && c.type === 'missing_parent'));
+    assert.ok(res.conflicts.some((c) => c.id === revConflict.id && c.type === 'rev_conflict'));
+    assert.ok(res.conflicts.some((c) => c.id === claimConflict.id && c.type === 'claim_conflict'));
+    assert.ok(res.conflicts.some((c) => c.id === depOnConflict.id && c.type === 'dependency_conflict'));
+    assert.ok(res.conflicts.some((c) => c.id === verdictConflict.id && c.type === 'verdict_conflict'));
+
+    // Safe event for WP-005 was applied despite conflicts on other packets
+    assert.ok(res.safe.includes(safeEv.id));
+    assert.ok(res.applied.includes(safeEv.id));
+    assert.equal(fs.existsSync(path.join(eventsDir(repo.root), `${safeEv.id}.json`)), true);
+
+    // Conflicting claim was NOT applied to local store
+    assert.equal(fs.existsSync(path.join(eventsDir(repo.root), `${claimConflict.id}.json`)), false);
   } finally { repo.cleanup(); }
 });

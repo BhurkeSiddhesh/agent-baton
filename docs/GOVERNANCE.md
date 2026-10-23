@@ -44,6 +44,8 @@ Packet leases carry monotonically increasing integer fencing tokens (`lease_toke
 
 Multi-event transitions (`begin`, `reclaim`, `submit`, `verdict`, `block`, `handoff`, `reassign`, `gate`) support explicit operation IDs (`op_id`). Interrupted transitions can retry idempotently without emitting duplicate ledger verdicts or broadcast messages. Transition to `READY_FOR_REVIEW` requires both a valid on-disk verify marker and an authenticated `verify` event committed to the ledger under the active lease token, preventing partial or uncommitted operations from authorizing packet completion. Run `baton ledger reconcile` to reconcile interrupted operations or clean orphaned verify markers.
 
+Diverged clone reconciliation (`baton ledger reconcile [--from <dir>] [--dry-run]`) deterministically merges independent safe events across separate Git clones while detecting corrupt events, missing causal parents, concurrent revision collisions, competing simultaneous claims, and contradictory verdicts. Unsafe conflicts are surfaced with machine-readable resolution guidance and are never silently overwritten.
+
 ## Deprecation and migration
 
 1. Create a tracked issue describing the motivation, old behavior and migration/rollback path. Mark security changes separately.
