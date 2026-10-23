@@ -18,13 +18,15 @@
 
 </div>
 
-**Agent Baton** installs a multi-agent workflow into any repository with one command. A goal is split into
-**packets** that each own an exact list of files. Agents claim a packet, work inside its scope, pass a verify gate
-(scope guard, secret scan, tests), and hand it to a *different* agent for review. Every step is an event in an
-append-only, hash-checked ledger of one JSON file per event, so it merges cleanly under git and is shared by local and
-cloud agents. Claude Code, Codex, Gemini CLI, Antigravity, Cursor, Copilot, Windsurf, Cline, Aider and OpenCode all
-get thin adapter files that point at the same protocol. Zero runtime dependencies, Node 18 or newer, Windows, macOS
-and Linux.
+**Agent Baton** is being built as an autonomous, provider-neutral software-delivery orchestrator. A human gives one
+lead agent a product goal; that orchestrator inspects the project, plans the work, assigns isolated packets to coding
+agents, monitors them, launches independent reviews, integrates accepted changes, verifies the running product and
+replans until the goal-level acceptance contract is satisfied or a real human decision is required.
+
+The current v0.1.0 release provides the Git-native coordination foundation for that system: exact file ownership,
+leases, verification gates, independent review and a replayable ledger. It does **not yet** run the complete autonomous
+loop. The distinction between the shipped foundation and the product north star is intentional and tracked in the
+[product vision](docs/PRODUCT_VISION.md) and [engineering roadmap](docs/ROADMAP.md).
 
 **Security boundary:** Agent Baton is **not a sandbox** or an identity/authorization system. Packet ownership, hooks, review names and ledger hashes reduce coordination errors but do not contain an agent with shell or repository-write access. Run untrusted workers with OS-level isolation and protect merges through GitHub policies. See the [security model](docs/SECURITY_MODEL.md) for enforced checks, bypasses and deployment guidance.
 
@@ -43,6 +45,25 @@ and Linux.
 **Before vs. after:** Without Baton you coordinate files, owners, handoffs and verification manually across agent sessions. With Baton you can track those decisions in a shared plan and ledger, see which packet is ready, and reject out-of-scope changes at the verify gate. It **does not** replace shell isolation, GitHub branch rules, trusted human review or a process supervisor.
 
 For the full working example—from request to proposal, approval, `next`, `begin`, `verify`, review and merge—see [the feature-request walkthrough](#from-a-feature-request-to-merged-code-who-orchestrates-and-how-do-agents-pick-up-work). See the [security model](docs/SECURITY_MODEL.md) for the trust boundaries and the [roadmap](docs/ROADMAP.md) for unattended-agent features that are still proposals.
+
+## Where Baton is going
+
+The target experience is one durable conversation with a lead orchestrator:
+
+```text
+goal → inspect → plan → dispatch → build → verify → review → repair → integrate
+     → run/browser-test → evaluate the original goal → replan or finish
+```
+
+The orchestrator may implement a packet itself, but never reviews its own work. A deterministic controller—not a
+model prompt—owns timers, wakeups, leases, retries, budgets, process health and restart recovery. Workers operate in
+isolated worktrees or sandboxes and can use declared tools such as the shell, browser automation, MCP servers and
+cloud APIs. The human supervises progress and intervenes for product ambiguity, privileged actions, exhausted
+budgets or repeated failure rather than manually driving every transition.
+
+Baton will support both greenfield goals and work in an existing repository. The planned deployment model includes
+local installation, a managed service, and private enterprise deployments in AWS, Azure, Kubernetes or an on-premises
+environment. See [Product vision](docs/PRODUCT_VISION.md) and [Enterprise and cloud architecture](docs/ENTERPRISE_CLOUD.md).
 
 ## 60-second quickstart
 
@@ -117,7 +138,7 @@ Plan, assign, begin, build, verify, submit, review, accept or reject, then merge
 
 **Example request:** "Work on adding a CSV export feature, with validation and tests."
 
-Agent Baton is a **coordination protocol and CLI**, not a background agent supervisor. The *orchestrator* is a role
+Agent Baton v0.1.0 is a **coordination protocol and CLI**, not yet a background agent supervisor. The *orchestrator* is a role
 (normally Claude, or a human) that plans and assigns work. The *workers* are coding agents you start locally or
 dispatch through supported GitHub workflows. All actors read the **same plan** (`.baton/plan.json`) and share events
 through the **ledger** (`.baton/ledger/` and the local store).
@@ -314,11 +335,13 @@ codex       0      0    0      0    0       0           -          1(9)
 
 ## Documentation
 
+- [Product vision](docs/PRODUCT_VISION.md) - goal-to-outcome orchestration, operating loop and product modes
+- [Enterprise and cloud architecture](docs/ENTERPRISE_CLOUD.md) - SaaS, AWS/Azure, private deployment and subscription model
 - [Tested compatibility](docs/COMPATIBILITY.md) - verified Node/OS matrix and Windows shell smoke
 - [Quickstart](docs/QUICKSTART.md) - install, plan, run your first packet
 - [CI and release readiness](docs/CI_RELEASE.md) - platform tests, diagnostics, package smoke and gated version tags
 - [Regression coverage](docs/COVERAGE.md) - Node baseline, raw V8 artifacts and regression policy
-- [Engineering roadmap](docs/ROADMAP.md) - 88 scoped issues, priorities, prerequisites and release phases
+- [Engineering roadmap](docs/ROADMAP.md) - issue buckets, autonomous MVP critical path and release phases
 - [Concepts](docs/CONCEPTS.md) - agents, tracks, packets, gates, ledger, bus
 - [Workflow](docs/WORKFLOW.md) - the full lifecycle and the review rules
 - [Commands](docs/COMMANDS.md) - every command and flag, from the real `--help`
