@@ -22,6 +22,13 @@ project directory. `npx agent-baton` works only after the package is published t
 You edited a generated file, so baton did not overwrite it. Diff the two, merge what you want, delete the sidecar. Use
 `--force` to overwrite regardless.
 
+**`init`, `upgrade` or `uninstall` failed partway through.**
+These commands snapshot every path they will mutate and roll the complete file set back when an operation throws, including
+the prior manifest, managed blocks and Baton data removed by uninstall. Fix the reported filesystem problem and retry the
+same command. If the error says `ROLLBACK_FAILED`, stop and restore the listed path from version control or backup before
+retrying; do not assume the manifest describes the working tree. Abrupt process or machine termination cannot execute an
+in-process rollback, so run `baton doctor` and repeat the idempotent command after restart.
+
 **`agent X: kind "Y" has no adapter (declare it in .baton/agents.json)`**
 The roster entry has a kind baton does not know. Use a built-in kind or declare a custom one, see
 [AGENTS.md](AGENTS.md#adding-a-custom-agent).

@@ -5,6 +5,7 @@ import { BatonError } from '../lib/errors.js';
 import { commonDir } from '../lib/git.js';
 import { removeTracked, SIDECAR_SUFFIX } from '../install/installer.js';
 import { loadManifest, manifestPath } from '../install/manifest.js';
+import { captureTransaction } from '../install/transaction.js';
 
 export const name = 'uninstall';
 export const group = 'Setup';
@@ -69,18 +70,29 @@ export async function run(ctx, args) {
   }
 
   if (!args.dryRun) {
-    for (const i of removals) {
-      if (i.rec) removeTracked(root, i.rel, i.rec);
-      else if (i.dir) fs.rmSync(path.join(root, i.dir), { recursive: true, force: true });
-      else fs.rmSync(i.abs || path.join(root, i.path), { recursive: true, force: true });
+    const transaction = captureTransaction(removals.map((i) => i.abs || path.join(root, i.dir || i.path)));
+    let mutations = 0;
+    try {
+      for (const i of removals) {
+        if (i.rec) removeTracked(root, i.rel, i.rec);
+        else if (i.dir) fs.rmSync(path.join(root, i.dir), { recursive: true, force: true });
+        else fs.rmSync(i.abs || path.join(root, i.path), { recursive: true, force: true });
+        mutations++;
+        if (Number.isInteger(args._failAfter) && args._failAfter === mutations) throw new Error(`injected uninstall failure after mutation ${mutations}`);
+      }
+      // drop .baton itself when nothing of yours is left in it
+      const baton = path.join(root, '.baton');
+      const sweep = (d) => {
+        for (const e of fs.existsSync(d) ? fs.readdirSync(d, { withFileTypes: true }) : []) if (e.isDirectory()) sweep(path.join(d, e.name));
+        try { if (!fs.readdirSync(d).length) fs.rmdirSync(d); } catch { /* not empty */ }
+      };
+      sweep(baton);
+      transaction.commit();
+    } catch (err) {
+      const failures = transaction.rollback();
+      if (failures.length) throw new BatonError(`uninstall failed and rollback was incomplete: ${failures.join('; ')}`, { code: 'ROLLBACK_FAILED' });
+      throw err;
     }
-    // drop .baton itself when nothing of yours is left in it
-    const baton = path.join(root, '.baton');
-    const sweep = (d) => {
-      for (const e of fs.existsSync(d) ? fs.readdirSync(d, { withFileTypes: true }) : []) if (e.isDirectory()) sweep(path.join(d, e.name));
-      try { if (!fs.readdirSync(d).length) fs.rmdirSync(d); } catch { /* not empty */ }
-    };
-    sweep(baton);
   }
 
   const kept = items.filter((i) => i.action === 'keep');
