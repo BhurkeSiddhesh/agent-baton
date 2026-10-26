@@ -46,7 +46,7 @@ jobs:
           name: full-test-${{ matrix.os }}-node${{ matrix.node }}
           path: full-test.log
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 3
 
   git_baseline:
     name: Git 2.30 baseline (Debian 11, Node 18)
@@ -137,7 +137,7 @@ jobs:
           name: security-${{ matrix.os }}
           path: security-test.log
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 3
 
   package:
     name: package integrity and offline install
@@ -180,7 +180,7 @@ jobs:
           path: |
             pack.json
             offline-core-metrics.json
-          retention-days: 7
+          retention-days: 3
 
   smoke:
     name: smoke init and doctor (${{ matrix.os }})

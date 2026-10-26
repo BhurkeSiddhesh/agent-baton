@@ -10,10 +10,10 @@ Agent Baton uses Node's built-in coverage collector; no production dependency is
 npm run test:coverage
 ```
 
-On CI, `NODE_V8_COVERAGE=coverage/v8` writes machine-readable V8 coverage records, and [parse-coverage.mjs](../.github/scripts/parse-coverage.mjs) converts the Node "all files" line to percentages for lines, branches and functions. The first successful `main` run after the workflow is merged is the **baseline**. Report the measured figures and link the run in release notes rather than asserting unmeasured percentages.
+On CI, [parse-coverage.mjs](../.github/scripts/parse-coverage.mjs) converts the Node "all files" line to percentages for lines, branches and functions. The first successful `main` run after the workflow is merged is the **baseline**. Report the measured figures and link the run in release notes rather than asserting unmeasured percentages.
 
 **No arbitrary thresholds are enforced initially.** After at least three healthy main-branch runs, maintainers should compare the actual per-file and aggregate measurements, exclude fixture-only noise, and set realistic regression thresholds in a separate reviewable PR. Until then, code reviews enforce meaningful new tests rather than a fabricated percentage.
 
 Priority regression surfaces are: engine state transitions and reviewer separation; lease/lock recovery; ownership/protected paths; installer rollback/idempotency; verify/merge invariants and dangerous shell dispatch. Every fixed defect must carry a regression test, ideally including an unsafe/negative path and a recovery path. A percentage gain alone is not proof of behavioral safety.
 
-`NODE_V8_COVERAGE` data is diagnostics rather than an attestation. Keep raw coverage files out of distributed packages; scripts run offline.
+Coverage figures are diagnostics rather than an attestation. CI uploads only the small summary (`coverage-summary.txt`/`.json`, 3-day retention); raw V8 coverage dumps are several MB per run, so they are not collected on CI. To inspect them, run `NODE_V8_COVERAGE=coverage/v8 npm run test:coverage` locally. Keep raw coverage files out of distributed packages; scripts run offline.
