@@ -3,3 +3,4 @@ node_modules/
 .baton/views/
 *.log
 .DS_Store
+coverage/

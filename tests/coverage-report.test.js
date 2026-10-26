@@ -26,7 +26,7 @@ test('coverage policy runs the whole test suite on a supported runtime', () => {
   const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   assert.equal(pkg.scripts['test:coverage'], 'node --test --experimental-test-coverage');
   const workflow = fs.readFileSync(new URL('../.github/workflows/coverage.yml', import.meta.url), 'utf8');
-  assert.match(workflow, /NODE_V8_COVERAGE/);
+  assert.doesNotMatch(workflow, /NODE_V8_COVERAGE|coverage\/v8/, 'raw V8 dumps are large; CI uploads only the summary');
   assert.match(workflow, /upload-artifact@v4/);
   assert.match(fs.readFileSync(new URL('../docs/COVERAGE.md', import.meta.url), 'utf8'), /no arbitrary thresholds/i);
 });
